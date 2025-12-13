@@ -20,9 +20,11 @@ Für die Ausführung wird ein Webserver mit PHP benötigt.
 Kopiert die beiden Dateien config.php und index.php in ein Verzeichnis. 
 Bei einem Neuen Server direkt in das root Verzeichnis des Webservers.
 
-In der config.php müssen 3 Parameter angepasst werden:
+In der config.php müssen 4 Parameter angepasst werden:
 
-API_URL       hier sollte es reichen wenn die IP Adresse geändert wird.
-API_BASE_URL  hier sollte es reichen wenn die IP Adresse geändert wird.
-API_USERNAME  wird in der Nibesteuerung festgelegt
-API_PASSWORD  wird in der Nibesteuerung festgelegt
+* API_URL       hier sollte es reichen wenn die IP Adresse geändert wird.
+* API_BASE_URL  hier sollte es reichen wenn die IP Adresse geändert wird.
+* API_USERNAME  wird in der Nibesteuerung festgelegt
+* API_PASSWORD  wird in der Nibesteuerung festgelegt
+
+<img width="1427" height="779" alt="API Datenpunkte" src="https://github.com/user-attachments/assets/bc9ca457-da23-4700-aefb-77461f5b323b" />
