@@ -27,4 +27,4 @@ In der config.php müssen 4 Parameter angepasst werden:
 * API_USERNAME  wird in der Nibesteuerung festgelegt
 * API_PASSWORD  wird in der Nibesteuerung festgelegt
 
-<img width="1427" height="779" alt="API Datenpunkte" src="https://github.com/user-attachments/assets/bc9ca457-da23-4700-aefb-77461f5b323b" />
+<img width="1427" height="779" alt="API Datenpunkte" src="https://github.com/SvenPausH/NibeAPI/blob/main/API%20Datenpunkte%20v2.png" />
