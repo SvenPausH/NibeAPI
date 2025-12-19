@@ -1,6 +1,6 @@
 <?php
 /**
- * API Daten Abruf mit Auto-Refresh
+ * API Daten Abruf mit Auto-Refresh - Version 2.0.43
  * Hauptdatei: index.php
  */
 
@@ -20,7 +20,6 @@ function debugLog($message, $data = null, $type = 'INFO') {
     }
     
     try {
-        // Prüfen ob Log-Datei zu groß ist (Log-Rotation)
         if (file_exists(DEBUG_LOG_FULLPATH) && filesize(DEBUG_LOG_FULLPATH) > DEBUG_LOG_MAX_SIZE) {
             $backupFile = DEBUG_LOG_PATH . date('Y-m-d_His') . '_' . DEBUG_LOG_FILE;
             @rename(DEBUG_LOG_FULLPATH, $backupFile);
@@ -38,12 +37,9 @@ function debugLog($message, $data = null, $type = 'INFO') {
         }
         
         $logEntry .= "\n" . str_repeat('-', 80) . "\n";
-        
-        // In Datei schreiben
         @file_put_contents(DEBUG_LOG_FULLPATH, $logEntry, FILE_APPEND | LOCK_EX);
         
     } catch (Exception $e) {
-        // Fehler beim Logging ignorieren, um Hauptfunktionalität nicht zu stören
         error_log("Debug-Log Fehler: " . $e->getMessage());
     }
 }
@@ -52,99 +48,72 @@ function debugLog($message, $data = null, $type = 'INFO') {
  * Funktion zum Abrufen der API-Daten
  */
 function fetchApiData($url, $apiKey = '', $username = '', $password = '') {
-    debugLog("API-Aufruf gestartet", ['url' => $url, 'hasApiKey' => !empty($apiKey), 'hasBasicAuth' => !empty($username)], 'API');
+    debugLog("API-Aufruf gestartet", ['url' => $url], 'API');
     
     $ch = curl_init();
-    
     curl_setopt($ch, CURLOPT_URL, $url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     
-    // Headers setzen mit deutscher Sprache
     $headers = [
         'Accept: application/json',
         'Content-Type: application/json',
         'Accept-Language: de-DE,de;q=0.9',
-        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     ];
     
     if (!empty($apiKey)) {
         $headers[] = 'Authorization: Bearer ' . $apiKey;
-        debugLog("Bearer Token hinzugefügt", null, 'AUTH');
     }
     
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-    
-    // Browser-ähnliche Cookie-Behandlung
     curl_setopt($ch, CURLOPT_COOKIEJAR, '');
     curl_setopt($ch, CURLOPT_COOKIEFILE, '');
     
-    // Basic Authentication (falls benötigt)
     if (!empty($username) && !empty($password)) {
         curl_setopt($ch, CURLOPT_USERPWD, $username . ':' . $password);
-        debugLog("Basic Auth hinzugefügt", ['username' => $username], 'AUTH');
     }
     
     curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-    
-    // Request-Start-Zeit
     $startTime = microtime(true);
-    
     $response = curl_exec($ch);
-    
-    // Request-Dauer berechnen
     $duration = round((microtime(true) - $startTime) * 1000, 2);
     
     if (curl_errno($ch)) {
         $error = curl_error($ch);
         curl_close($ch);
-        debugLog("cURL Fehler", ['error' => $error, 'duration_ms' => $duration], 'ERROR');
+        debugLog("cURL Fehler", ['error' => $error], 'ERROR');
         throw new Exception('cURL Fehler: ' . $error);
     }
     
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlInfo = curl_getinfo($ch);
     curl_close($ch);
     
-    debugLog("API-Antwort erhalten", [
-        'httpCode' => $httpCode,
-        'duration_ms' => $duration,
-        'response_size' => strlen($response),
-        'content_type' => $curlInfo['content_type'] ?? 'unknown'
-    ], 'API');
+    debugLog("API-Antwort erhalten", ['httpCode' => $httpCode, 'duration_ms' => $duration], 'API');
     
     if ($httpCode !== 200) {
-        debugLog("HTTP Fehler", ['httpCode' => $httpCode, 'response' => substr($response, 0, 500)], 'ERROR');
         throw new Exception('HTTP Fehler: Status Code ' . $httpCode);
     }
     
     return $response;
 }
 
-// Prüfen ob AJAX-Request zum Schreiben
+// AJAX-Request zum Schreiben
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'write') {
     header('Content-Type: application/json; charset=utf-8');
-    
-    debugLog("PATCH-Request empfangen", null, 'WRITE');
     
     try {
         $input = json_decode(file_get_contents('php://input'), true);
         $variableId = $input['variableId'] ?? null;
         $newValue = $input['value'] ?? null;
         
-        debugLog("PATCH-Request Daten", ['variableId' => $variableId, 'newValue' => $newValue], 'WRITE');
-        
         if ($variableId === null || $newValue === null) {
             throw new Exception('Fehlende Parameter');
         }
         
-        // PATCH Request an die API senden
         $writeUrl = API_URL;
-        
-        debugLog("PATCH-Request wird gesendet", ['url' => $writeUrl], 'WRITE');
-        
         $ch = curl_init();
         curl_setopt($ch, CURLOPT_URL, $writeUrl);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -152,223 +121,131 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'write') {
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         
-        $headers = [
-            'Accept: application/json',
-            'Content-Type: application/json',
-            'Accept-Language: de-DE,de;q=0.9'
-        ];
+        $headers = ['Accept: application/json', 'Content-Type: application/json'];
         
-        // Basic Auth (wenn konfiguriert)
         if (!empty(API_USERNAME) && !empty(API_PASSWORD)) {
             $basicAuth = base64_encode(API_USERNAME . ':' . API_PASSWORD);
             $headers[] = 'Authorization: Basic ' . $basicAuth;
-            debugLog("Basic Auth hinzugefügt", ['username' => API_USERNAME], 'AUTH');
-        }
-        // Fallback auf Bearer Token
-        elseif (!empty(API_KEY)) {
+        } elseif (!empty(API_KEY)) {
             $headers[] = 'Authorization: Bearer ' . API_KEY;
-            debugLog("Bearer Token hinzugefügt", null, 'AUTH');
         }
         
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         
-        // JSON Body mit vollständiger Struktur gemäß API-Spezifikation
-        // Body ist ein Array von datavalue-Objekten
-        $bodyData = [
-            [
-                'type' => 'datavalue',
-                'isOk' => true,
-                'variableId' => (int)$variableId,
-                'integerValue' => (int)$newValue,
-                'stringValue' => ''
-            ]
-        ];
+        $bodyData = [[
+            'type' => 'datavalue',
+            'isOk' => true,
+            'variableId' => (int)$variableId,
+            'integerValue' => (int)$newValue,
+            'stringValue' => ''
+        ]];
         
-        $postData = json_encode($bodyData);
-        
-        debugLog("PATCH Request Body (vollständig)", ['body' => $postData, 'bodyArray' => $bodyData], 'WRITE');
-        
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
-        
-        $startTime = microtime(true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($bodyData));
         $response = curl_exec($ch);
-        $duration = round((microtime(true) - $startTime) * 1000, 2);
-        
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        
-        if (curl_errno($ch)) {
-            $error = curl_error($ch);
-            debugLog("PATCH cURL Fehler", ['error' => $error], 'ERROR');
-            curl_close($ch);
-            throw new Exception('cURL Fehler: ' . $error);
-        }
-        
-        debugLog("PATCH Response erhalten", [
-            'httpCode' => $httpCode,
-            'duration_ms' => $duration,
-            'response' => $response
-        ], 'WRITE');
-        
         curl_close($ch);
         
         if ($httpCode >= 200 && $httpCode < 300) {
-            debugLog("PATCH erfolgreich", ['variableId' => $variableId, 'value' => $newValue], 'SUCCESS');
-            echo json_encode([
-                'success' => true,
-                'message' => 'Wert erfolgreich gespeichert',
-                'httpCode' => $httpCode
-            ], JSON_UNESCAPED_UNICODE);
+            echo json_encode(['success' => true, 'message' => 'Wert erfolgreich gespeichert'], JSON_UNESCAPED_UNICODE);
         } else {
-            debugLog("PATCH Fehler", ['httpCode' => $httpCode, 'response' => $response], 'ERROR');
-            throw new Exception('HTTP Fehler: ' . $httpCode . ' - ' . $response);
+            throw new Exception('HTTP Fehler: ' . $httpCode);
         }
         
     } catch (Exception $e) {
-        debugLog("PATCH Exception", ['error' => $e->getMessage()], 'ERROR');
-        echo json_encode([
-            'success' => false,
-            'error' => $e->getMessage()
-        ], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
 
-// Prüfen ob AJAX-Request zum Lesen
+// AJAX-Request zum Lesen
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'fetch') {
     header('Content-Type: application/json; charset=utf-8');
     
-    debugLog("AJAX Fetch-Request empfangen", null, 'FETCH');
-    
     try {
         $jsonData = fetchApiData(API_URL, API_KEY, API_USERNAME, API_PASSWORD);
-        
-        // UTF-8 Encoding sicherstellen
-        if (mb_detect_encoding($jsonData, 'UTF-8', true) === false) {
-            $jsonData = utf8_encode($jsonData);
-            debugLog("JSON zu UTF-8 konvertiert", null, 'FETCH');
-        }
-        
         $rawData = json_decode($jsonData, true);
         
         if (json_last_error() !== JSON_ERROR_NONE) {
-            debugLog("JSON Dekodierungs-Fehler", ['error' => json_last_error_msg()], 'ERROR');
-            throw new Exception('JSON Dekodierungs-Fehler: ' . json_last_error_msg());
+            throw new Exception('JSON Dekodierungs-Fehler');
         }
         
-        debugLog("JSON erfolgreich dekodiert", ['datapoints' => count($rawData)], 'FETCH');
-        
-        // JSON-Struktur umwandeln
         $data = [];
         foreach ($rawData as $id => $point) {
-            $variableId = $point['metadata']['variableId'] ?? $id;
-            $modbusRegisterID = $point['metadata']['modbusRegisterID'] ?? '-';
-            $title = $point['title'] ?? '-';
-            $modbusRegisterType = $point['metadata']['modbusRegisterType'] ?? '-';
-            $isWritable = $point['metadata']['isWritable'] ?? false;
-            
             $intValue = $point['value']['integerValue'] ?? 0;
             $divisor = $point['metadata']['divisor'] ?? 1;
-            $unit = $point['metadata']['unit'] ?? '';
             $decimal = $point['metadata']['decimal'] ?? 0;
+            $unit = $point['metadata']['unit'] ?? '';
             
-            if ($divisor > 1) {
-                $calculatedValue = number_format($intValue / $divisor, $decimal, ',', '.');
-            } else {
-                $calculatedValue = $intValue;
-            }
-            
-            $value = $calculatedValue . ($unit ? ' ' . $unit : '');
+            $calculatedValue = $divisor > 1 ? 
+                number_format($intValue / $divisor, $decimal, ',', '.') : $intValue;
             
             $data[] = [
-                'variableid' => $variableId,
-                'modbusregisterid' => $modbusRegisterID,
-                'title' => $title,
-                'modbusregistertype' => $modbusRegisterType,
-                'value' => $value,
+                'variableid' => $point['metadata']['variableId'] ?? $id,
+                'modbusregisterid' => $point['metadata']['modbusRegisterID'] ?? '-',
+                'title' => $point['title'] ?? '-',
+                'modbusregistertype' => $point['metadata']['modbusRegisterType'] ?? '-',
+                'value' => $calculatedValue . ($unit ? ' ' . $unit : ''),
                 'rawvalue' => $intValue,
                 'unit' => $unit,
                 'divisor' => $divisor,
                 'decimal' => $decimal,
-                'isWritable' => $isWritable
+                'isWritable' => $point['metadata']['isWritable'] ?? false,
+                'variableType' => $point['metadata']['variableType'] ?? '-',
+                'variableSize' => $point['metadata']['variableSize'] ?? '-',
+                'minValue' => $point['metadata']['minValue'] ?? 0,
+                'maxValue' => $point['metadata']['maxValue'] ?? 0
             ];
         }
         
-        debugLog("Daten erfolgreich verarbeitet", ['count' => count($data)], 'SUCCESS');
-        
-        echo json_encode([
-            'success' => true,
-            'data' => $data,
-            'timestamp' => date('Y-m-d H:i:s')
-        ], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => true, 'data' => $data, 'timestamp' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE);
         
     } catch (Exception $e) {
-        debugLog("Fetch Exception", ['error' => $e->getMessage()], 'ERROR');
-        echo json_encode([
-            'success' => false,
-            'error' => $e->getMessage()
-        ], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
 
-// Initiale Daten laden für erste Anzeige
+// Initiale Daten laden
 $error = null;
 $data = [];
 
-debugLog("Seite geladen - Initiale Daten werden abgerufen", null, 'INIT');
-
 try {
     $jsonData = fetchApiData(API_URL, API_KEY, API_USERNAME, API_PASSWORD);
-    
-    if (mb_detect_encoding($jsonData, 'UTF-8', true) === false) {
-        $jsonData = utf8_encode($jsonData);
-    }
-    
     $rawData = json_decode($jsonData, true);
     
     if (json_last_error() !== JSON_ERROR_NONE) {
-        throw new Exception('JSON Dekodierungs-Fehler: ' . json_last_error_msg());
+        throw new Exception('JSON Dekodierungs-Fehler');
     }
     
     foreach ($rawData as $id => $point) {
-        $variableId = $point['metadata']['variableId'] ?? $id;
-        $modbusRegisterID = $point['metadata']['modbusRegisterID'] ?? '-';
-        $title = $point['title'] ?? '-';
-        $modbusRegisterType = $point['metadata']['modbusRegisterType'] ?? '-';
-        $isWritable = $point['metadata']['isWritable'] ?? false;
-        
         $intValue = $point['value']['integerValue'] ?? 0;
         $divisor = $point['metadata']['divisor'] ?? 1;
-        $unit = $point['metadata']['unit'] ?? '';
         $decimal = $point['metadata']['decimal'] ?? 0;
+        $unit = $point['metadata']['unit'] ?? '';
         
-        if ($divisor > 1) {
-            $calculatedValue = number_format($intValue / $divisor, $decimal, ',', '.');
-        } else {
-            $calculatedValue = $intValue;
-        }
-        
-        $value = $calculatedValue . ($unit ? ' ' . $unit : '');
+        $calculatedValue = $divisor > 1 ? 
+            number_format($intValue / $divisor, $decimal, ',', '.') : $intValue;
         
         $data[] = [
-            'variableid' => $variableId,
-            'modbusregisterid' => $modbusRegisterID,
-            'title' => $title,
-            'modbusregistertype' => $modbusRegisterType,
-            'value' => $value,
+            'variableid' => $point['metadata']['variableId'] ?? $id,
+            'modbusregisterid' => $point['metadata']['modbusRegisterID'] ?? '-',
+            'title' => $point['title'] ?? '-',
+            'modbusregistertype' => $point['metadata']['modbusRegisterType'] ?? '-',
+            'value' => $calculatedValue . ($unit ? ' ' . $unit : ''),
             'rawvalue' => $intValue,
             'unit' => $unit,
             'divisor' => $divisor,
             'decimal' => $decimal,
-            'isWritable' => $isWritable
+            'isWritable' => $point['metadata']['isWritable'] ?? false,
+            'variableType' => $point['metadata']['variableType'] ?? '-',
+            'variableSize' => $point['metadata']['variableSize'] ?? '-',
+            'minValue' => $point['metadata']['minValue'] ?? 0,
+            'maxValue' => $point['metadata']['maxValue'] ?? 0
         ];
     }
     
-    debugLog("Initiale Daten erfolgreich geladen", ['count' => count($data)], 'SUCCESS');
-    
 } catch (Exception $e) {
     $error = $e->getMessage();
-    debugLog("Fehler beim Laden der initialen Daten", ['error' => $error], 'ERROR');
 }
 
 ?>
@@ -377,331 +254,92 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Datenpunkte - Live</title>
+    <title>API Datenpunkte - Live v42</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f5f5f5;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            padding: 30px;
-        }
-        
-        h1 {
-            color: #333;
-            margin-bottom: 20px;
-            font-size: 28px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .live-indicator {
-            width: 12px;
-            height: 12px;
-            background: #4CAF50;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        
-        .live-indicator.error {
-            background: #f44336;
-            animation: none;
-        }
-        
-        .filter-section {
-            background: #f8f9fa;
-            padding: 20px;
-            border-radius: 6px;
-            margin-bottom: 20px;
-        }
-        
-        .filter-row {
-            display: flex;
-            gap: 15px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
-        
-        .filter-group {
-            flex: 1;
-            min-width: 200px;
-        }
-        
-        label {
-            display: block;
-            font-weight: 600;
-            color: #555;
-            margin-bottom: 5px;
-            font-size: 14px;
-        }
-        
-        input[type="text"], select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        
-        input[type="text"]:focus, select:focus {
-            outline: none;
-            border-color: #4CAF50;
-        }
-        
-        .button-group {
-            display: flex;
-            gap: 10px;
-            align-items: flex-end;
-        }
-        
-        button {
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: background 0.3s;
-        }
-        
-        .btn-reset {
-            background: #6c757d;
-            color: white;
-        }
-        
-        .btn-reset:hover {
-            background: #5a6268;
-        }
-        
-        .btn-toggle {
-            background: #4CAF50;
-            color: white;
-        }
-        
-        .btn-toggle:hover {
-            background: #45a049;
-        }
-        
-        .btn-toggle.paused {
-            background: #ff9800;
-        }
-        
-        .info-bar {
-            background: #e7f3ff;
-            padding: 12px;
-            border-left: 4px solid #2196F3;
-            margin-bottom: 20px;
-            border-radius: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 15px;
-        }
-        
-        .info-left {
-            display: flex;
-            gap: 20px;
-            flex-wrap: wrap;
-        }
-        
-        .last-update {
-            font-size: 13px;
-            color: #666;
-        }
-        
-        .error {
-            background: #ffebee;
-            color: #c62828;
-            padding: 15px;
-            border-left: 4px solid #c62828;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-        
-        .table-wrapper {
-            overflow-x: auto;
-        }
-        
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 10px;
-        }
-        
-        thead {
-            background: #2196F3;
-            color: white;
-        }
-        
-        th {
-            padding: 15px;
-            text-align: left;
-            font-weight: 600;
-            cursor: pointer;
-            user-select: none;
-        }
-        
-        th:hover {
-            background: #1976D2;
-        }
-        
-        th.sortable::after {
-            content: ' ⇅';
-            opacity: 0.5;
-        }
-        
-        td {
-            padding: 12px 15px;
-            border-bottom: 1px solid #eee;
-            transition: background-color 0.3s;
-        }
-        
-        tbody tr:hover {
-            background: #f5f5f5;
-        }
-        
-        tbody tr:nth-child(even) {
-            background: #fafafa;
-        }
-        
-        tbody tr:nth-child(even):hover {
-            background: #f0f0f0;
-        }
-        
-        .value-changed {
-            background: #fff9c4 !important;
-        }
-        
-        .value-cell {
-            position: relative;
-        }
-        
-        .editable-value {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .value-display {
-            flex: 1;
-        }
-        
-        .btn-edit {
-            padding: 4px 8px;
-            background: #2196F3;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.3s;
-        }
-        
-        .btn-edit:hover {
-            background: #1976D2;
-        }
-        
-        .edit-input {
-            width: 150px;
-            padding: 6px;
-            border: 2px solid #2196F3;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        
-        .btn-save {
-            padding: 4px 12px;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
-            margin-right: 4px;
-        }
-        
-        .btn-save:hover {
-            background: #45a049;
-        }
-        
-        .btn-cancel {
-            padding: 4px 12px;
-            background: #f44336;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 600;
-        }
-        
-        .btn-cancel:hover {
-            background: #da190b;
-        }
-        
-        .saving-indicator {
-            color: #2196F3;
-            font-size: 12px;
-            font-style: italic;
-        }
-        
-        .no-data {
-            text-align: center;
-            padding: 40px;
-            color: #999;
-            font-style: italic;
-        }
-        
-        @media (max-width: 768px) {
-            .filter-row {
-                flex-direction: column;
-            }
-            
-            .filter-group {
-                width: 100%;
-            }
-            
-            table {
-                font-size: 12px;
-            }
-            
-            th, td {
-                padding: 8px;
-            }
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 30px; }
+        h1 { color: #333; margin-bottom: 20px; font-size: 28px; display: flex; align-items: center; gap: 10px; }
+        .live-indicator { width: 12px; height: 12px; background: #4CAF50; border-radius: 50%; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .live-indicator.error { background: #f44336; animation: none; }
+        .filter-section { background: #f8f9fa; padding: 20px; border-radius: 6px; margin-bottom: 20px; }
+        .filter-toggles { display: flex; gap: 15px; padding: 10px 0; flex-wrap: wrap; margin-bottom: 15px; }
+        .toggle-option { display: flex; align-items: center; gap: 8px; }
+        .toggle-option input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; }
+        .toggle-option label { margin: 0; cursor: pointer; font-weight: 500; font-size: 14px; }
+        .filter-row { display: flex; gap: 15px; flex-wrap: wrap; align-items: center; }
+        .filter-group { flex: 1; min-width: 200px; }
+        label { display: block; font-weight: 600; color: #555; margin-bottom: 5px; font-size: 14px; }
+        input[type="text"], select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        input[type="text"]:focus, select:focus { outline: none; border-color: #4CAF50; }
+        .button-group { display: flex; gap: 10px; align-items: flex-end; }
+        button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background 0.3s; }
+        .btn-reset { background: #6c757d; color: white; }
+        .btn-reset:hover { background: #5a6268; }
+        .btn-toggle { background: #4CAF50; color: white; }
+        .btn-toggle:hover { background: #45a049; }
+        .btn-toggle.paused { background: #ff9800; }
+        .info-bar { background: #e7f3ff; padding: 12px; border-left: 4px solid #2196F3; margin-bottom: 20px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
+        .info-left { display: flex; gap: 20px; flex-wrap: wrap; }
+        .last-update { font-size: 13px; color: #666; }
+        .error { background: #ffebee; color: #c62828; padding: 15px; border-left: 4px solid #c62828; border-radius: 4px; margin-bottom: 20px; }
+        .table-wrapper { overflow-x: auto; position: relative; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        thead { background: #2196F3; color: white; }
+        th { padding: 15px; text-align: left; font-weight: 600; cursor: pointer; user-select: none; }
+        th:hover { background: #1976D2; }
+        th.sortable::after { content: ' ⇅'; opacity: 0.5; }
+        td { padding: 12px 15px; border-bottom: 1px solid #eee; transition: background-color 0.3s; }
+        tbody tr:hover { background: #f5f5f5; }
+        tbody tr:nth-child(even) { background: #fafafa; }
+        tbody tr:nth-child(even):hover { background: #f0f0f0; }
+        .value-changed { background: #fff9c4 !important; }
+        .value-cell { position: relative; }
+        .editable-value { display: flex; align-items: center; gap: 8px; }
+        .value-display { flex: 1; }
+        .btn-edit { padding: 4px 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.3s; }
+        .btn-edit:hover { background: #1976D2; }
+        .edit-input { width: 150px; padding: 6px; border: 2px solid #2196F3; border-radius: 4px; font-size: 14px; }
+        .btn-save { padding: 4px 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; margin-right: 4px; }
+        .btn-save:hover { background: #45a049; }
+        .btn-cancel { padding: 4px 12px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
+        .btn-cancel:hover { background: #da190b; }
+        .saving-indicator { color: #2196F3; font-size: 12px; font-style: italic; }
+        .checkbox-cell { text-align: center; width: 40px; }
+        .row-checkbox { cursor: pointer; width: 18px; height: 18px; }
+        .row-tooltip { position: fixed; background: #333; color: white; padding: 10px; border-radius: 6px; font-size: 12px; z-index: 1000; display: none; min-width: 250px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); pointer-events: none; }
+        .row-tooltip.show { display: block; }
+        .row-tooltip::before { content: ''; position: absolute; top: -5px; left: 20px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 5px solid #333; }
+        .tooltip-row { display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #555; }
+        .tooltip-row:last-child { border-bottom: none; }
+        .tooltip-label { font-weight: 600; color: #aaa; }
+        .tooltip-value { color: #fff; }
+        .no-data { text-align: center; padding: 40px; color: #999; font-style: italic; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>
-            <span class="live-indicator" id="liveIndicator"></span>
-            📊 API Datenpunkte Übersicht - Live
-        </h1>
+        <h1><span class="live-indicator" id="liveIndicator"></span>📊 API Datenpunkte Übersicht - Live v2.0.42</h1>
         
         <div id="errorContainer"></div>
         
         <div class="filter-section">
+            <div class="filter-toggles">
+                <div class="toggle-option">
+                    <input type="checkbox" id="filterSelectedOnly">
+                    <label for="filterSelectedOnly">Nur ausgewählte anzeigen</label>
+                </div>
+                <div class="toggle-option">
+                    <input type="checkbox" id="showTooltips" checked>
+                    <label for="showTooltips">Zusatzinformationen bei Hover anzeigen</label>
+                </div>
+                <div class="toggle-option">
+                    <input type="checkbox" id="hideValuesActive" checked>
+                    <label for="hideValuesActive">Hide Values aktiv</label>
+                </div>
+            </div>
+            
             <div class="filter-row">
                 <div class="filter-group">
                     <label for="filterVariableId">API ID</label>
@@ -709,26 +347,20 @@ try {
                 </div>
                 <div class="filter-group">
                     <label for="filterModbusRegisterID">Modbus ID</label>
-                    <input type="text" id="filterModbusRegisterID" placeholder="Filter nach modbusRegisterID...">
-                </div>                
-                
+                    <input type="text" id="filterModbusRegisterID" placeholder="Filter nach Modbus ID...">
+                </div>
                 <div class="filter-group">
                     <label for="filterTitle">Title</label>
                     <input type="text" id="filterTitle" placeholder="Filter nach Title...">
                 </div>
-                
                 <div class="filter-group">
                     <label for="filterRegisterType">Modbus Register Type</label>
-                    <select id="filterRegisterType">
-                        <option value="">Alle</option>
-                    </select>
+                    <select id="filterRegisterType"><option value="">Alle</option></select>
                 </div>
-                
                 <div class="filter-group">
                     <label for="filterValue">Value</label>
                     <input type="text" id="filterValue" placeholder="Filter nach Value...">
                 </div>
-                
                 <div class="button-group">
                     <button class="btn-reset" onclick="resetFilters()">Zurücksetzen</button>
                     <button class="btn-toggle" id="toggleButton" onclick="toggleAutoUpdate()">Pause</button>
@@ -741,43 +373,48 @@ try {
                 <div>Gesamt: <strong><span id="totalCount">0</span></strong> Einträge</div>
                 <div>Angezeigt: <strong><span id="visibleCount">0</span></strong> Einträge</div>
             </div>
-            <div class="last-update">
-                Letzte Aktualisierung: <strong><span id="lastUpdate">-</span></strong>
-            </div>
+            <div class="last-update">Letzte Aktualisierung: <strong><span id="lastUpdate">-</span></strong></div>
         </div>
         
         <div class="table-wrapper">
+            <div class="row-tooltip" id="rowTooltip"></div>
             <table id="dataTable">
                 <thead>
                     <tr>
-                        <th class="sortable" onclick="sortTable(0)">API ID</th>
-                        <th class="sortable" onclick="sortTable(1)">Modbus ID</th>
-                        <th class="sortable" onclick="sortTable(2)">Title</th>
-                        <th class="sortable" onclick="sortTable(3)">Modbus Register Type</th>
-                        <th class="sortable" onclick="sortTable(4)">Value</th>
+                        <th class="checkbox-cell"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()" title="Alle auswählen/abwählen"></th>
+                        <th class="sortable" onclick="sortTable(1)">API ID</th>
+                        <th class="sortable" onclick="sortTable(2)">Modbus ID</th>
+                        <th class="sortable" onclick="sortTable(3)">Title</th>
+                        <th class="sortable" onclick="sortTable(4)">Modbus Register Type</th>
+                        <th class="sortable" onclick="sortTable(5)">Value</th>
                     </tr>
                 </thead>
                 <tbody id="tableBody">
                     <?php if ($error): ?>
-                        <tr>
-                            <td colspan="4" class="no-data error">Fehler: <?php echo htmlspecialchars($error); ?></td>
-                        </tr>
+                        <tr><td colspan="6" class="no-data error">Fehler: <?php echo htmlspecialchars($error); ?></td></tr>
                     <?php elseif (empty($data)): ?>
-                        <tr>
-                            <td colspan="4" class="no-data">Keine Daten verfügbar</td>
-                        </tr>
+                        <tr><td colspan="6" class="no-data">Keine Daten verfügbar</td></tr>
                     <?php else: ?>
                         <?php foreach ($data as $point): ?>
-                            <tr data-variableid="<?php echo htmlspecialchars($point['variableid']); ?>">
-                                <td><?php echo htmlspecialchars($point['variableid']); ?></td>
-                                <td><?php echo htmlspecialchars($point['modbusregisterid']); ?></td>                                
+                            <tr data-variableid="<?php echo $point['variableid']; ?>"
+                                data-variabletype="<?php echo $point['variableType']; ?>"
+                                data-variablesize="<?php echo $point['variableSize']; ?>"
+                                data-divisor="<?php echo $point['divisor']; ?>"
+                                data-decimal="<?php echo $point['decimal']; ?>"
+                                data-minvalue="<?php echo $point['minValue']; ?>"
+                                data-maxvalue="<?php echo $point['maxValue']; ?>"
+                                onmouseenter="showTooltip(event, this)"
+                                onmouseleave="hideTooltip()">
+                                <td class="checkbox-cell"><input type="checkbox" class="row-checkbox" onchange="updateSelectAllState()"></td>
+                                <td><?php echo $point['variableid']; ?></td>
+                                <td><?php echo $point['modbusregisterid']; ?></td>
                                 <td><?php echo htmlspecialchars($point['title']); ?></td>
-                                <td><?php echo htmlspecialchars($point['modbusregistertype']); ?></td>
+                                <td><?php echo $point['modbusregistertype']; ?></td>
                                 <td class="value-cell">
                                     <?php if ($point['modbusregistertype'] === 'MODBUS_HOLDING_REGISTER' && $point['isWritable']): ?>
                                         <div class="editable-value">
                                             <span class="value-display"><?php echo htmlspecialchars($point['value']); ?></span>
-                                            <button class="btn-edit" onclick="editValue(this)" title="Bearbeiten">✏️</button>
+                                            <button class="btn-edit" onclick="editValue(this)">✏️</button>
                                         </div>
                                     <?php else: ?>
                                         <?php echo htmlspecialchars($point['value']); ?>
@@ -792,59 +429,99 @@ try {
     </div>
     
     <script>
-        // Initiale Daten
         let tableData = <?php echo json_encode($data, JSON_UNESCAPED_UNICODE); ?>;
         let autoUpdateEnabled = true;
         let updateInterval = null;
+        const hideValues = <?php echo json_encode(HIDE_VALUES); ?>;
         
-        // Auto-Update starten
-        function startAutoUpdate() {
-            if (updateInterval) {
-                clearInterval(updateInterval);
+        function showTooltip(event, row) {
+            if (!document.getElementById('showTooltips').checked) return;
+            const tooltip = document.getElementById('rowTooltip');
+            tooltip.innerHTML = `
+                <div class="tooltip-row"><span class="tooltip-label">Variable Type:</span><span class="tooltip-value">${row.dataset.variabletype}</span></div>
+                <div class="tooltip-row"><span class="tooltip-label">Variable Size:</span><span class="tooltip-value">${row.dataset.variablesize}</span></div>
+                <div class="tooltip-row"><span class="tooltip-label">Divisor:</span><span class="tooltip-value">${row.dataset.divisor}</span></div>
+                <div class="tooltip-row"><span class="tooltip-label">Decimal:</span><span class="tooltip-value">${row.dataset.decimal}</span></div>
+                <div class="tooltip-row"><span class="tooltip-label">Min Value:</span><span class="tooltip-value">${row.dataset.minvalue}</span></div>
+                <div class="tooltip-row"><span class="tooltip-label">Max Value:</span><span class="tooltip-value">${row.dataset.maxvalue}</span></div>
+            `;
+            
+            // Position berechnen - direkt an der Zeile
+            const rect = row.getBoundingClientRect();
+            
+            // Tooltip unterhalb der Zeile positionieren
+            tooltip.style.left = rect.left + 'px';
+            tooltip.style.top = (rect.bottom + 5) + 'px';
+            
+            // Sicherstellen, dass Tooltip nicht aus dem Viewport läuft
+            tooltip.classList.add('show');
+            
+            // Überprüfen ob Tooltip rechts aus dem Viewport läuft
+            const tooltipRect = tooltip.getBoundingClientRect();
+            if (tooltipRect.right > window.innerWidth) {
+                tooltip.style.left = (window.innerWidth - tooltipRect.width - 10) + 'px';
             }
             
-            updateInterval = setInterval(fetchData, 10000); // Alle 10 Sekunden
+            // Überprüfen ob Tooltip unten aus dem Viewport läuft
+            if (tooltipRect.bottom > window.innerHeight) {
+                // Tooltip über der Zeile anzeigen
+                tooltip.style.top = (rect.top - tooltipRect.height - 5) + 'px';
+            }
+        }
+        
+        function hideTooltip() {
+            document.getElementById('rowTooltip').classList.remove('show');
+        }
+        
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('selectAll');
+            document.querySelectorAll('.row-checkbox').forEach(cb => {
+                if (cb.closest('tr').style.display !== 'none') cb.checked = selectAll.checked;
+            });
+        }
+        
+        function updateSelectAllState() {
+            const checkboxes = Array.from(document.querySelectorAll('.row-checkbox')).filter(cb => cb.closest('tr').style.display !== 'none');
+            const checkedCount = checkboxes.filter(cb => cb.checked).length;
+            const selectAll = document.getElementById('selectAll');
+            selectAll.checked = checkboxes.length > 0 && checkedCount === checkboxes.length;
+            selectAll.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
+        }
+        
+        function startAutoUpdate() {
+            if (updateInterval) clearInterval(updateInterval);
+            updateInterval = setInterval(fetchData, 10000);
             autoUpdateEnabled = true;
-            
             document.getElementById('toggleButton').textContent = 'Pause';
             document.getElementById('toggleButton').classList.remove('paused');
             document.getElementById('liveIndicator').classList.remove('error');
         }
         
-        // Auto-Update stoppen
         function stopAutoUpdate() {
             if (updateInterval) {
                 clearInterval(updateInterval);
                 updateInterval = null;
             }
             autoUpdateEnabled = false;
-            
             document.getElementById('toggleButton').textContent = 'Start';
             document.getElementById('toggleButton').classList.add('paused');
         }
         
-        // Toggle Auto-Update
         function toggleAutoUpdate() {
-            if (autoUpdateEnabled) {
-                stopAutoUpdate();
-            } else {
-                startAutoUpdate();
-            }
+            autoUpdateEnabled ? stopAutoUpdate() : startAutoUpdate();
         }
         
-        // Daten vom Server abrufen
         async function fetchData() {
             try {
                 const response = await fetch('?ajax=fetch');
                 const result = await response.json();
-                
                 if (result.success) {
                     updateTable(result.data);
                     document.getElementById('lastUpdate').textContent = result.timestamp;
                     document.getElementById('liveIndicator').classList.remove('error');
                     clearError();
                 } else {
-                    showError('Fehler beim Laden der Daten: ' + result.error);
+                    showError('Fehler beim Laden: ' + result.error);
                     document.getElementById('liveIndicator').classList.add('error');
                 }
             } catch (error) {
@@ -853,125 +530,113 @@ try {
             }
         }
         
-        // Tabelle aktualisieren
         function updateTable(newData) {
             tableData = newData;
             const tbody = document.getElementById('tableBody');
-            
-            // Alte Werte speichern
             const oldValues = {};
+            const oldChecked = {};
+            
             tbody.querySelectorAll('tr').forEach(row => {
-                const variableId = row.getAttribute('data-variableid');
-                const valueCell = row.cells[4];
-                if (variableId && valueCell) {
-                    oldValues[variableId] = valueCell.textContent.trim();
-                }
+                const id = row.dataset.variableid;
+                const cb = row.querySelector('.row-checkbox');
+                if (id && row.cells[5]) oldValues[id] = row.cells[5].textContent.trim();
+                if (id && cb) oldChecked[id] = cb.checked;
             });
             
-            // Tabelle neu aufbauen
             tbody.innerHTML = '';
             
             newData.forEach(point => {
                 const row = tbody.insertRow();
-                row.setAttribute('data-variableid', point.variableid);
+                Object.entries({
+                    variableid: point.variableid,
+                    variabletype: point.variableType,
+                    variablesize: point.variableSize,
+                    divisor: point.divisor,
+                    decimal: point.decimal,
+                    minvalue: point.minValue,
+                    maxvalue: point.maxValue
+                }).forEach(([k, v]) => row.dataset[k] = v);
                 
-                row.insertCell(0).textContent = point.variableid;
-                row.insertCell(1).textContent = point.modbusregisterid;
-                row.insertCell(2).textContent = point.title;
-                row.insertCell(3).textContent = point.modbusregistertype;
+                row.onmouseenter = e => showTooltip(e, row);
+                row.onmouseleave = hideTooltip;
                 
-                const valueCell = row.insertCell(4);
+                const cbCell = row.insertCell(0);
+                cbCell.className = 'checkbox-cell';
+                const cb = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.className = 'row-checkbox';
+                cb.checked = oldChecked[point.variableid] || false;
+                cb.onchange = updateSelectAllState;
+                cbCell.appendChild(cb);
+                
+                row.insertCell(1).textContent = point.variableid;
+                row.insertCell(2).textContent = point.modbusregisterid;
+                row.insertCell(3).textContent = point.title;
+                row.insertCell(4).textContent = point.modbusregistertype;
+                
+                const valueCell = row.insertCell(5);
                 valueCell.className = 'value-cell';
                 
-                // Editierbare Felder für MODBUS_HOLDING_REGISTER
                 if (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' && point.isWritable) {
-                    const editableDiv = document.createElement('div');
-                    editableDiv.className = 'editable-value';
-                    
-                    const valueSpan = document.createElement('span');
-                    valueSpan.className = 'value-display';
-                    valueSpan.textContent = point.value;
-                    
-                    const editBtn = document.createElement('button');
-                    editBtn.className = 'btn-edit';
-                    editBtn.textContent = '✏️';
-                    editBtn.title = 'Bearbeiten';
-                    editBtn.onclick = function() { editValue(this); };
-                    
-                    editableDiv.appendChild(valueSpan);
-                    editableDiv.appendChild(editBtn);
-                    valueCell.appendChild(editableDiv);
-                    
-                    // Zusätzliche Daten speichern
-                    valueCell.setAttribute('data-rawvalue', point.rawvalue);
-                    valueCell.setAttribute('data-divisor', point.divisor);
-                    valueCell.setAttribute('data-decimal', point.decimal);
-                    valueCell.setAttribute('data-unit', point.unit);
+                    const div = document.createElement('div');
+                    div.className = 'editable-value';
+                    const span = document.createElement('span');
+                    span.className = 'value-display';
+                    span.textContent = point.value;
+                    const btn = document.createElement('button');
+                    btn.className = 'btn-edit';
+                    btn.textContent = '✏️';
+                    btn.onclick = () => editValue(btn);
+                    div.appendChild(span);
+                    div.appendChild(btn);
+                    valueCell.appendChild(div);
+                    valueCell.dataset.rawvalue = point.rawvalue;
+                    valueCell.dataset.divisor = point.divisor;
+                    valueCell.dataset.decimal = point.decimal;
+                    valueCell.dataset.unit = point.unit;
                 } else {
                     valueCell.textContent = point.value;
                 }
                 
-                // Wert-Änderung hervorheben
-                const currentDisplayValue = point.value;
-                if (oldValues[point.variableid] && oldValues[point.variableid] !== currentDisplayValue) {
+                if (oldValues[point.variableid] && oldValues[point.variableid] !== point.value) {
                     valueCell.classList.add('value-changed');
-                    setTimeout(() => {
-                        valueCell.classList.remove('value-changed');
-                    }, 2000);
+                    setTimeout(() => valueCell.classList.remove('value-changed'), 2000);
                 }
             });
             
-            // Filter und Zähler aktualisieren
             initRegisterTypeFilter();
             filterTable();
             updateCounts();
+            updateSelectAllState();
         }
         
-        // Wert bearbeiten
         function editValue(button) {
             const valueCell = button.closest('.value-cell');
             const editableDiv = valueCell.querySelector('.editable-value');
             const valueSpan = editableDiv.querySelector('.value-display');
             const currentValue = valueSpan.textContent;
-            const variableId = valueCell.closest('tr').getAttribute('data-variableid');
-            
-            // Nur numerischen Wert extrahieren (ohne Einheit)
+            const variableId = valueCell.closest('tr').dataset.variableid;
             const numericValue = currentValue.replace(/[^\d,.-]/g, '').replace(',', '.');
             
-            // Input-Feld erstellen
             const input = document.createElement('input');
             input.type = 'number';
             input.step = 'any';
             input.className = 'edit-input';
             input.value = numericValue;
             
-            // Save Button
             const saveBtn = document.createElement('button');
             saveBtn.className = 'btn-save';
             saveBtn.textContent = '💾 Speichern';
-            saveBtn.onclick = function() { saveValue(variableId, valueCell, input.value); };
+            saveBtn.onclick = () => saveValue(variableId, valueCell, input.value);
             
-            // Cancel Button
             const cancelBtn = document.createElement('button');
             cancelBtn.className = 'btn-cancel';
             cancelBtn.textContent = '❌ Abbrechen';
-            cancelBtn.onclick = function() { cancelEdit(valueCell, currentValue); };
+            cancelBtn.onclick = () => cancelEdit(valueCell, currentValue);
             
-            // Enter-Taste zum Speichern
-            input.addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') {
-                    saveValue(variableId, valueCell, input.value);
-                }
-            });
+            input.onkeypress = e => e.key === 'Enter' && saveValue(variableId, valueCell, input.value);
+            input.onkeydown = e => e.key === 'Escape' && cancelEdit(valueCell, currentValue);
             
-            // ESC-Taste zum Abbrechen
-            input.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') {
-                    cancelEdit(valueCell, currentValue);
-                }
-            });
-            
-            // Alten Inhalt durch Edit-Elemente ersetzen
             editableDiv.innerHTML = '';
             editableDiv.appendChild(input);
             editableDiv.appendChild(saveBtn);
@@ -981,226 +646,178 @@ try {
             input.select();
         }
         
-        // Wert speichern
         async function saveValue(variableId, valueCell, newValue) {
             const editableDiv = valueCell.querySelector('.editable-value');
-            const divisor = parseInt(valueCell.getAttribute('data-divisor')) || 1;
-            const unit = valueCell.getAttribute('data-unit') || '';
-            const decimal = parseInt(valueCell.getAttribute('data-decimal')) || 0;
+            const divisor = parseInt(valueCell.dataset.divisor) || 1;
+            const unit = valueCell.dataset.unit || '';
+            const decimal = parseInt(valueCell.dataset.decimal) || 0;
             
-            // Anzeige während des Speicherns
             editableDiv.innerHTML = '<span class="saving-indicator">💾 Speichere...</span>';
             
             try {
-                // Wert mit Divisor multiplizieren für API (Rohwert)
                 const rawValue = Math.round(parseFloat(newValue) * divisor);
-                
                 const response = await fetch('?ajax=write', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        variableId: variableId,
-                        value: rawValue
-                    })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({variableId: variableId, value: rawValue})
                 });
                 
                 const result = await response.json();
                 
                 if (result.success) {
-                    // Formatierter Wert für Anzeige
-                    let displayValue;
-                    if (divisor > 1) {
-                        displayValue = parseFloat(newValue).toFixed(decimal).replace('.', ',');
-                    } else {
-                        displayValue = newValue;
-                    }
+                    let displayValue = divisor > 1 ? parseFloat(newValue).toFixed(decimal).replace('.', ',') : newValue;
                     displayValue += (unit ? ' ' + unit : '');
                     
-                    // Erfolgreiche Speicherung - Wert anzeigen
                     editableDiv.innerHTML = `
                         <span class="value-display">${displayValue}</span>
-                        <button class="btn-edit" onclick="editValue(this)" title="Bearbeiten">✏️</button>
+                        <button class="btn-edit" onclick="editValue(this)">✏️</button>
                     `;
                     
-                    // Kurz grün markieren
                     valueCell.style.background = '#c8e6c9';
-                    setTimeout(() => {
-                        valueCell.style.background = '';
-                    }, 1000);
-                    
-                    // Daten sofort neu laden
-                    setTimeout(() => {
-                        fetchData();
-                    }, 500);
-                    
+                    setTimeout(() => valueCell.style.background = '', 1000);
+                    setTimeout(fetchData, 500);
                 } else {
                     throw new Error(result.error || 'Unbekannter Fehler');
                 }
-                
             } catch (error) {
                 alert('Fehler beim Speichern: ' + error.message);
-                // Original-Wert wiederherstellen
                 const point = tableData.find(p => p.variableid == variableId);
                 if (point) {
                     editableDiv.innerHTML = `
                         <span class="value-display">${point.value}</span>
-                        <button class="btn-edit" onclick="editValue(this)" title="Bearbeiten">✏️</button>
+                        <button class="btn-edit" onclick="editValue(this)">✏️</button>
                     `;
                 }
             }
         }
         
-        // Bearbeitung abbrechen
         function cancelEdit(valueCell, originalValue) {
             const editableDiv = valueCell.querySelector('.editable-value');
             editableDiv.innerHTML = `
                 <span class="value-display">${originalValue}</span>
-                <button class="btn-edit" onclick="editValue(this)" title="Bearbeiten">✏️</button>
+                <button class="btn-edit" onclick="editValue(this)">✏️</button>
             `;
         }
         
-        // Fehler anzeigen
         function showError(message) {
-            const errorContainer = document.getElementById('errorContainer');
-            errorContainer.innerHTML = `<div class="error"><strong>Fehler:</strong> ${message}</div>`;
+            document.getElementById('errorContainer').innerHTML = `<div class="error"><strong>Fehler:</strong> ${message}</div>`;
         }
         
-        // Fehler löschen
         function clearError() {
             document.getElementById('errorContainer').innerHTML = '';
         }
         
-        // Filter-Optionen für Register Type initialisieren
         function initRegisterTypeFilter() {
-            const registerTypes = new Set();
-            tableData.forEach(point => {
-                if (point.modbusregistertype) {
-                    registerTypes.add(point.modbusregistertype);
-                }
-            });
-            
+            const types = new Set();
+            tableData.forEach(point => point.modbusregistertype && types.add(point.modbusregistertype));
             const select = document.getElementById('filterRegisterType');
             const currentValue = select.value;
             select.innerHTML = '<option value="">Alle</option>';
-            
-            registerTypes.forEach(type => {
+            types.forEach(type => {
                 const option = document.createElement('option');
                 option.value = type;
                 option.textContent = type;
-                if (type === currentValue) {
-                    option.selected = true;
-                }
+                if (type === currentValue) option.selected = true;
                 select.appendChild(option);
             });
         }
         
-        // Tabelle filtern
         function filterTable() {
-            const filterVariableId = document.getElementById('filterVariableId').value.toLowerCase();
-            const filterModbusRegisterID = document.getElementById('filterModbusRegisterID').value.toLowerCase();
-            const filterTitle = document.getElementById('filterTitle').value.toLowerCase();
-            const filterRegisterType = document.getElementById('filterRegisterType').value.toLowerCase();
-            const filterValue = document.getElementById('filterValue').value.toLowerCase();
+            const filters = {
+                variableId: document.getElementById('filterVariableId').value.toLowerCase(),
+                modbusRegisterID: document.getElementById('filterModbusRegisterID').value.toLowerCase(),
+                title: document.getElementById('filterTitle').value.toLowerCase(),
+                registerType: document.getElementById('filterRegisterType').value.toLowerCase(),
+                value: document.getElementById('filterValue').value.toLowerCase(),
+                selectedOnly: document.getElementById('filterSelectedOnly').checked,
+                hideValuesActive: document.getElementById('hideValuesActive').checked
+            };
             
             const tbody = document.getElementById('tableBody');
-            const rows = tbody.getElementsByTagName('tr');
             let visibleCount = 0;
             
-            for (let row of rows) {
-                const cells = row.getElementsByTagName('td');
-                if (cells.length === 0) continue;
+            Array.from(tbody.rows).forEach(row => {
+                const cells = row.cells;
+                if (cells.length === 0) return;
                 
-                const variableId = cells[0].textContent.toLowerCase();
-                const modbusRegisterID = cells[1].textContent.toLowerCase();
-                const title = cells[2].textContent.toLowerCase();
-                const registerType = cells[3].textContent.toLowerCase();
-                const value = cells[4].textContent.toLowerCase();
+                const checkbox = row.querySelector('.row-checkbox');
+                const matches = {
+                    variableId: cells[1].textContent.toLowerCase().includes(filters.variableId),
+                    modbusRegisterID: cells[2].textContent.toLowerCase().includes(filters.modbusRegisterID),
+                    title: cells[3].textContent.toLowerCase().includes(filters.title),
+                    registerType: !filters.registerType || cells[4].textContent.toLowerCase().includes(filters.registerType),
+                    value: cells[5].textContent.toLowerCase().includes(filters.value),
+                    selected: !filters.selectedOnly || (checkbox && checkbox.checked),
+                    hideValues: !filters.hideValuesActive || !hideValues.some(v => cells[5].textContent.toLowerCase().includes(v.toLowerCase()))
+                };
                 
-                const matchVariableId = variableId.includes(filterVariableId);
-                const matchModbusRegisterID = modbusRegisterID.includes(filterModbusRegisterID);
-                const matchTitle = title.includes(filterTitle);
-                const matchRegisterType = filterRegisterType === '' || registerType.includes(filterRegisterType);
-                const matchValue = value.includes(filterValue);
-                
-                if (matchVariableId && matchModbusRegisterID && matchTitle && matchRegisterType && matchValue) {
+                if (Object.values(matches).every(m => m)) {
                     row.style.display = '';
                     visibleCount++;
                 } else {
                     row.style.display = 'none';
                 }
-            }
+            });
             
             document.getElementById('visibleCount').textContent = visibleCount;
+            updateSelectAllState();
         }
         
-        // Zähler aktualisieren
         function updateCounts() {
-            const totalCount = tableData.length;
-            document.getElementById('totalCount').textContent = totalCount;
+            document.getElementById('totalCount').textContent = tableData.length;
         }
         
-        // Filter zurücksetzen
         function resetFilters() {
             document.getElementById('filterVariableId').value = '';
             document.getElementById('filterModbusRegisterID').value = '';
             document.getElementById('filterTitle').value = '';
             document.getElementById('filterRegisterType').value = '';
             document.getElementById('filterValue').value = '';
+            document.getElementById('filterSelectedOnly').checked = false;
+            document.getElementById('hideValuesActive').checked = true;
             filterTable();
         }
         
-        // Tabelle sortieren
         let sortDirection = {};
         function sortTable(columnIndex) {
             const tbody = document.getElementById('tableBody');
-            const rows = Array.from(tbody.getElementsByTagName('tr'));
-            
+            const rows = Array.from(tbody.rows);
             const direction = sortDirection[columnIndex] === 'asc' ? 'desc' : 'asc';
             sortDirection[columnIndex] = direction;
             
             rows.sort((a, b) => {
-                const aValue = a.getElementsByTagName('td')[columnIndex].textContent.trim();
-                const bValue = b.getElementsByTagName('td')[columnIndex].textContent.trim();
-                
+                const aValue = a.cells[columnIndex].textContent.trim();
+                const bValue = b.cells[columnIndex].textContent.trim();
                 const aNum = parseFloat(aValue);
                 const bNum = parseFloat(bValue);
                 
                 if (!isNaN(aNum) && !isNaN(bNum)) {
                     return direction === 'asc' ? aNum - bNum : bNum - aNum;
                 }
-                
-                return direction === 'asc' 
-                    ? aValue.localeCompare(bValue)
-                    : bValue.localeCompare(aValue);
+                return direction === 'asc' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
             });
             
             rows.forEach(row => tbody.appendChild(row));
         }
         
-        // Event Listener für Live-Filter
-        document.getElementById('filterVariableId').addEventListener('input', filterTable);
-        document.getElementById('filterModbusRegisterID').addEventListener('input', filterTable);
-        document.getElementById('filterTitle').addEventListener('input', filterTable);
-        document.getElementById('filterRegisterType').addEventListener('change', filterTable);
-        document.getElementById('filterValue').addEventListener('input', filterTable);
-        
-        // Initialisierung
         window.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('filterVariableId').addEventListener('input', filterTable);
+            document.getElementById('filterModbusRegisterID').addEventListener('input', filterTable);
+            document.getElementById('filterTitle').addEventListener('input', filterTable);
+            document.getElementById('filterRegisterType').addEventListener('change', filterTable);
+            document.getElementById('filterValue').addEventListener('input', filterTable);
+            document.getElementById('filterSelectedOnly').addEventListener('change', filterTable);
+            document.getElementById('hideValuesActive').addEventListener('change', filterTable);
+            
             initRegisterTypeFilter();
             updateCounts();
             filterTable();
+            updateSelectAllState();
             document.getElementById('lastUpdate').textContent = new Date().toLocaleString('de-DE');
-            
-            // Auto-Update starten
             startAutoUpdate();
         });
         
-        // Cleanup beim Verlassen der Seite
-        window.addEventListener('beforeunload', () => {
-            stopAutoUpdate();
-        });
+        window.addEventListener('beforeunload', stopAutoUpdate);
     </script>
 </body>
 </html>
