@@ -17,10 +17,18 @@ define('API_KEY', '');
 define('API_USERNAME', '');
 define('API_PASSWORD', '');
 
+// alle VALUE Werte die hier stehen werden in der Ausgabe ausgeblendet. Grund dafür sind z.b. Sensoren die nicht aktiv sind und eine min bzw. Maximal Wert haben. die ein Temperatursensor der mit -3.276,8 C angezeigt wird.
+define('HIDE_VALUES', [
+    '-3.276',
+    '-320000',
+]);
 // Optional: Weitere Konfigurationsoptionen
 
 // Timeout für API-Anfragen in Sekunden
 define('API_TIMEOUT', 30);
+
+// Alle x Sekunden wird neu gelesen. 10000 = 10 Sekunden 
+define('API_UPDATE_INTERVAL', 10000);
 
 // SSL-Zertifikat-Überprüfung (false für selbstsignierte Zertifikate)
 define('API_SSL_VERIFY', false);
