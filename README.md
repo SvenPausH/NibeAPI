@@ -27,4 +27,12 @@ In der config.php müssen 4 Parameter angepasst werden:
 * API_USERNAME  wird in der Nibesteuerung festgelegt
 * API_PASSWORD  wird in der Nibesteuerung festgelegt
 
+Ab Version 3 ist eine Datenbankfunktion dazu gekommen.
+In die Datenbank werden alle schreibaren Datenpunkte geschrieben. 
+Wenn sich ein Wert ändert wird diese mit Zeitstempel in die Log Tabelle geschrieben.
+Wird ein Wert mit NibeApi geändert ist dieser Wert mit Markiert.
+So kann unterschieden werden ein Wert mit der Anwendung oder an der Steuerung bzw. mit der App geändert wurde.
+Nibe ändert schreibbare Werte auch selbst. Bei mir sind es 2 Werte mit Gartminuten. Diese können mit dem Parameter NO_DB_UPDATE_APIID ausgeschlossen werden damit das Log nicht unnötig voll läuft.
+Die Api wird alle 10 Sekunden gelesen. Der Upate Interval ist in der config.php einstellbar.
+
 <img width="1427" height="779" alt="API Datenpunkte" src="https://github.com/SvenPausH/NibeAPI/blob/main/API%20Datenpunkte%20v2.png" />
