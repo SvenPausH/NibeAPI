@@ -22,13 +22,34 @@ define('HIDE_VALUES', [
     '-3.276',
     '-320000',
 ]);
+// Datenpunkte bei automatischen Refreh von Datenbank Log ausschließen weil die WP die Datenpunkte ständig ändert.
+define('NO_DB_UPDATE_APIID', [
+    781, // Gradminunten
+    1704, // Begrenzung GM
+    // Beispiel: 47011, 47012, 47013
+]);
+
+
 // Optional: Weitere Konfigurationsoptionen
+define('USE_DB', true); // true = Datenbank nutzen, false = Datenbank deaktiviert
+// DB Zugriff Maria / Mysql 
+define('DB_HOST', 'localhost');
+define('DB_NAME', 'nibeapi');
+define('DB_USER', 'root');
+define('DB_PASSWORD', '');
+define('DB_CHARSET', 'utf8mb4');
 
 // Timeout für API-Anfragen in Sekunden
 define('API_TIMEOUT', 30);
 
-// Alle x Sekunden wird neu gelesen. 10000 = 10 Sekunden 
+// Schnelle Updates (5 Sekunden)
+//define('API_UPDATE_INTERVAL', 5000);
+
+// Standard (10 Sekunden)
 define('API_UPDATE_INTERVAL', 10000);
+
+// Langsame Updates (30 Sekunden)
+//define('API_UPDATE_INTERVAL', 30000);
 
 // SSL-Zertifikat-Überprüfung (false für selbstsignierte Zertifikate)
 define('API_SSL_VERIFY', false);
