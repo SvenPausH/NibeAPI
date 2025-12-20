@@ -1,6 +1,6 @@
 <?php
 /**
- * API Daten Abruf mit Auto-Refresh - Version 2.0.43
+ * API Daten Abruf mit Auto-Refresh - Version 3.0.47
  * Hauptdatei: index.php
  */
 
@@ -254,7 +254,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Datenpunkte - Live v42</title>
+    <title>API Datenpunkte - Live v3</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; }
@@ -320,7 +320,7 @@ try {
 </head>
 <body>
     <div class="container">
-        <h1><span class="live-indicator" id="liveIndicator"></span>📊 API Datenpunkte Übersicht - Live v2.0.42</h1>
+        <h1><span class="live-indicator" id="liveIndicator"></span>📊 API Datenpunkte Übersicht - Live v3.0.47</h1>
         
         <div id="errorContainer"></div>
         
