@@ -1,6 +1,6 @@
 <?php
 /**
- * API Daten Abruf mit Auto-Refresh - Version 3.0.47
+ * API Daten Abruf mit Auto-Refresh - Version Version 3.0.47
  * Hauptdatei: index.php
  */
 
@@ -41,6 +41,237 @@ function debugLog($message, $data = null, $type = 'INFO') {
         
     } catch (Exception $e) {
         error_log("Debug-Log Fehler: " . $e->getMessage());
+    }
+}
+
+/**
+ * Datenbankverbindung herstellen
+ */
+function getDbConnection() {
+    if (!USE_DB) {
+        throw new Exception('Datenbankfunktionen sind deaktiviert (USE_DB = false)');
+    }
+    
+    try {
+        $dsn = "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;
+        $options = [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ];
+        
+        $pdo = new PDO($dsn, DB_USER, DB_PASSWORD, $options);
+        debugLog("Datenbankverbindung erfolgreich hergestellt", null, 'DB');
+        return $pdo;
+        
+    } catch (PDOException $e) {
+        debugLog("Datenbankverbindung fehlgeschlagen", ['error' => $e->getMessage()], 'ERROR');
+        throw new Exception('Datenbankverbindung fehlgeschlagen: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Beschreibbare Datenpunkte in Datenbank speichern/aktualisieren
+ * Wird nur beim initialen Aufruf ausgeführt
+ */
+function saveWritableDatapoints($datapoints) {
+    try {
+        $pdo = getDbConnection();
+        
+        // Prepared Statements für Insert und Update
+        $checkStmt = $pdo->prepare("SELECT id FROM nibe_datenpunkte WHERE api_id = ?");
+        $insertStmt = $pdo->prepare("
+            INSERT INTO nibe_datenpunkte (api_id, modbus_id, title, modbus_register_type) 
+            VALUES (?, ?, ?, ?)
+        ");
+        $updateStmt = $pdo->prepare("
+            UPDATE nibe_datenpunkte 
+            SET modbus_id = ?, title = ?, modbus_register_type = ? 
+            WHERE api_id = ?
+        ");
+        
+        $insertCount = 0;
+        $updateCount = 0;
+        
+        foreach ($datapoints as $point) {
+            // Nur beschreibbare Datenpunkte speichern
+            if (!isset($point['isWritable']) || !$point['isWritable']) {
+                continue;
+            }
+            
+            $apiId = $point['variableid'];
+            $modbusId = $point['modbusregisterid'];
+            $title = substr($point['title'], 0, 150); // Max 150 Zeichen laut DB-Schema
+            $registerType = substr($point['modbusregistertype'], 0, 30); // Max 30 Zeichen
+            
+            // Prüfen ob Datenpunkt bereits existiert
+            $checkStmt->execute([$apiId]);
+            $exists = $checkStmt->fetch();
+            
+            if ($exists) {
+                // Update
+                $updateStmt->execute([$modbusId, $title, $registerType, $apiId]);
+                $updateCount++;
+                debugLog("Datenpunkt aktualisiert", ['api_id' => $apiId, 'title' => $title], 'DB');
+            } else {
+                // Insert
+                $insertStmt->execute([$apiId, $modbusId, $title, $registerType]);
+                $insertCount++;
+                debugLog("Datenpunkt neu eingefügt", ['api_id' => $apiId, 'title' => $title], 'DB');
+            }
+        }
+        
+        debugLog("Datenpunkte gespeichert", [
+            'neu' => $insertCount,
+            'aktualisiert' => $updateCount,
+            'gesamt' => count($datapoints)
+        ], 'DB');
+        
+        return ['inserted' => $insertCount, 'updated' => $updateCount];
+        
+    } catch (PDOException $e) {
+        debugLog("Fehler beim Speichern der Datenpunkte", ['error' => $e->getMessage()], 'ERROR');
+        throw new Exception('Datenbankfehler: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Wertänderungen in nibe_datenpunkte_log protokollieren
+ */
+function logValueChanges($datapoints) {
+    try {
+        $pdo = getDbConnection();
+        
+        // Prepared Statements
+        $getDatapointIdStmt = $pdo->prepare("SELECT id FROM nibe_datenpunkte WHERE api_id = ?");
+        $getLastValueStmt = $pdo->prepare("
+            SELECT wert 
+            FROM nibe_datenpunkte_log 
+            WHERE nibe_datenpunkte_id = ? 
+            ORDER BY zeitstempel DESC 
+            LIMIT 1
+        ");
+        $insertLogStmt = $pdo->prepare("
+            INSERT INTO nibe_datenpunkte_log (nibe_datenpunkte_id, wert, cwna) 
+            VALUES (?, ?, ?)
+        ");
+        
+        $loggedCount = 0;
+        $skippedCount = 0;
+        
+        foreach ($datapoints as $point) {
+            // Nur für Datenpunkte die in der Master-Tabelle sind (beschreibbare)
+            $apiId = $point['variableid'];
+            $rawValue = $point['rawvalue']; // Integer-Wert ohne Divisor
+            
+            // Datenpunkt-ID aus Master-Tabelle holen
+            $getDatapointIdStmt->execute([$apiId]);
+            $datenpunkt = $getDatapointIdStmt->fetch();
+            
+            if (!$datenpunkt) {
+                // Datenpunkt nicht in Master-Tabelle (nicht beschreibbar)
+                continue;
+            }
+            
+            $datenpunktId = $datenpunkt['id'];
+            
+            // Letzten Wert aus Log holen
+            $getLastValueStmt->execute([$datenpunktId]);
+            $lastLog = $getLastValueStmt->fetch();
+            
+            // Prüfen ob API ID in NO_DB_UPDATE_APIID Liste ist
+            $isInNoUpdateList = in_array($apiId, NO_DB_UPDATE_APIID);
+            
+            if (!$lastLog) {
+                // Kein vorheriger Eintrag - initialen Wert IMMER schreiben (auch wenn in NO_DB_UPDATE_APIID)
+                $insertLogStmt->execute([$datenpunktId, $rawValue, '']);
+                $loggedCount++;
+                debugLog("Initialer Wert geloggt", [
+                    'api_id' => $apiId,
+                    'datenpunkt_id' => $datenpunktId,
+                    'wert' => $rawValue
+                ], 'DB_LOG');
+            } elseif ($lastLog['wert'] != $rawValue) {
+                // Wert hat sich geändert
+                if ($isInNoUpdateList) {
+                    // API ID ist in NO_DB_UPDATE_APIID - NICHT loggen
+                    $skippedCount++;
+                    debugLog("Wertänderung NICHT geloggt (in NO_DB_UPDATE_APIID)", [
+                        'api_id' => $apiId,
+                        'datenpunkt_id' => $datenpunktId,
+                        'alter_wert' => $lastLog['wert'],
+                        'neuer_wert' => $rawValue
+                    ], 'DB_LOG');
+                } else {
+                    // Normal loggen
+                    $insertLogStmt->execute([$datenpunktId, $rawValue, '']);
+                    $loggedCount++;
+                    debugLog("Wertänderung geloggt", [
+                        'api_id' => $apiId,
+                        'datenpunkt_id' => $datenpunktId,
+                        'alter_wert' => $lastLog['wert'],
+                        'neuer_wert' => $rawValue
+                    ], 'DB_LOG');
+                }
+            }
+        }
+        
+        if ($loggedCount > 0 || $skippedCount > 0) {
+            debugLog("Wertänderungen verarbeitet", [
+                'geloggt' => $loggedCount,
+                'übersprungen' => $skippedCount
+            ], 'DB_LOG');
+        }
+        
+        return $loggedCount;
+        
+    } catch (PDOException $e) {
+        debugLog("Fehler beim Loggen der Wertänderungen", ['error' => $e->getMessage()], 'ERROR');
+        throw new Exception('Datenbankfehler beim Loggen: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Manuell geschriebenen Wert in Log schreiben
+ * NO_DB_UPDATE_APIID wird hier IGNORIERT
+ * cwna Spalte wird mit "X" gefüllt
+ */
+function logManualWrite($apiId, $rawValue) {
+    try {
+        $pdo = getDbConnection();
+        
+        // Datenpunkt-ID aus Master-Tabelle holen
+        $stmt = $pdo->prepare("SELECT id FROM nibe_datenpunkte WHERE api_id = ?");
+        $stmt->execute([$apiId]);
+        $datenpunkt = $stmt->fetch();
+        
+        if (!$datenpunkt) {
+            debugLog("Datenpunkt nicht in Master-Tabelle gefunden", ['api_id' => $apiId], 'WARNING');
+            return false;
+        }
+        
+        $datenpunktId = $datenpunkt['id'];
+        
+        // Wert in Log schreiben - cwna mit "X" füllen (Change Was Not Automatic)
+        $insertStmt = $pdo->prepare("
+            INSERT INTO nibe_datenpunkte_log (nibe_datenpunkte_id, wert, cwna) 
+            VALUES (?, ?, 'X')
+        ");
+        $insertStmt->execute([$datenpunktId, $rawValue]);
+        
+        debugLog("Manueller Schreibvorgang geloggt", [
+            'api_id' => $apiId,
+            'datenpunkt_id' => $datenpunktId,
+            'wert' => $rawValue,
+            'cwna' => 'X',
+            'no_db_update_list_ignored' => in_array($apiId, NO_DB_UPDATE_APIID) ? 'ja' : 'nein'
+        ], 'DB_LOG');
+        
+        return true;
+        
+    } catch (PDOException $e) {
+        debugLog("Fehler beim Loggen des manuellen Schreibvorgangs", ['error' => $e->getMessage()], 'ERROR');
+        return false;
     }
 }
 
@@ -146,6 +377,15 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'write') {
         curl_close($ch);
         
         if ($httpCode >= 200 && $httpCode < 300) {
+            // Erfolgreich geschrieben - in Log schreiben (falls DB aktiviert)
+            if (USE_DB) {
+                try {
+                    logManualWrite($variableId, $newValue);
+                } catch (Exception $e) {
+                    debugLog("Fehler beim Loggen des Schreibvorgangs", ['error' => $e->getMessage()], 'ERROR');
+                }
+            }
+            
             echo json_encode(['success' => true, 'message' => 'Wert erfolgreich gespeichert'], JSON_UNESCAPED_UNICODE);
         } else {
             throw new Exception('HTTP Fehler: ' . $httpCode);
@@ -183,6 +423,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'fetch') {
                 'variableid' => $point['metadata']['variableId'] ?? $id,
                 'modbusregisterid' => $point['metadata']['modbusRegisterID'] ?? '-',
                 'title' => $point['title'] ?? '-',
+                'description' => $point['description'] ?? '',
                 'modbusregistertype' => $point['metadata']['modbusRegisterType'] ?? '-',
                 'value' => $calculatedValue . ($unit ? ' ' . $unit : ''),
                 'rawvalue' => $intValue,
@@ -197,6 +438,16 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'fetch') {
             ];
         }
         
+        // Wertänderungen in Log-Tabelle schreiben (falls DB aktiviert)
+        if (USE_DB) {
+            try {
+                logValueChanges($data);
+            } catch (Exception $e) {
+                // Fehler loggen, aber AJAX-Request nicht abbrechen
+                debugLog("Fehler beim Loggen der Wertänderungen (AJAX)", ['error' => $e->getMessage()], 'ERROR');
+            }
+        }
+        
         echo json_encode(['success' => true, 'data' => $data, 'timestamp' => date('Y-m-d H:i:s')], JSON_UNESCAPED_UNICODE);
         
     } catch (Exception $e) {
@@ -208,6 +459,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'fetch') {
 // Initiale Daten laden
 $error = null;
 $data = [];
+$dbSaveResult = null;
 
 try {
     $jsonData = fetchApiData(API_URL, API_KEY, API_USERNAME, API_PASSWORD);
@@ -230,6 +482,7 @@ try {
             'variableid' => $point['metadata']['variableId'] ?? $id,
             'modbusregisterid' => $point['metadata']['modbusRegisterID'] ?? '-',
             'title' => $point['title'] ?? '-',
+            'description' => $point['description'] ?? '',
             'modbusregistertype' => $point['metadata']['modbusRegisterType'] ?? '-',
             'value' => $calculatedValue . ($unit ? ' ' . $unit : ''),
             'rawvalue' => $intValue,
@@ -244,6 +497,24 @@ try {
         ];
     }
     
+    // Beschreibbare Datenpunkte in Master-Tabelle speichern (nur beim initialen Aufruf und falls DB aktiviert)
+    if (USE_DB) {
+        try {
+            $dbSaveResult = saveWritableDatapoints($data);
+            debugLog("Initiales Speichern in Master-Tabelle erfolgreich", $dbSaveResult, 'DB');
+            
+            // Initiale Werte in Log-Tabelle schreiben
+            logValueChanges($data);
+            debugLog("Initiale Werte in Log-Tabelle geschrieben", null, 'DB_LOG');
+            
+        } catch (Exception $e) {
+            // Fehler loggen, aber Seite nicht abbrechen
+            debugLog("Fehler beim initialen DB-Speichern", ['error' => $e->getMessage()], 'ERROR');
+        }
+    } else {
+        debugLog("Datenbank-Funktionen deaktiviert (USE_DB = false)", null, 'INFO');
+    }
+    
 } catch (Exception $e) {
     $error = $e->getMessage();
 }
@@ -254,7 +525,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Datenpunkte - Live v3</title>
+    <title>API Datenpunkte - Live v42</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; }
@@ -320,7 +591,7 @@ try {
 </head>
 <body>
     <div class="container">
-        <h1><span class="live-indicator" id="liveIndicator"></span>📊 API Datenpunkte Übersicht - Live v3.0.47</h1>
+        <h1><span class="live-indicator" id="liveIndicator"></span>📊 API Datenpunkte Übersicht - Live v42</h1>
         
         <div id="errorContainer"></div>
         
@@ -372,6 +643,11 @@ try {
             <div class="info-left">
                 <div>Gesamt: <strong><span id="totalCount">0</span></strong> Einträge</div>
                 <div>Angezeigt: <strong><span id="visibleCount">0</span></strong> Einträge</div>
+                <?php if (USE_DB && $dbSaveResult): ?>
+                    <div style="color: #4CAF50;">DB: <strong><?php echo $dbSaveResult['inserted']; ?></strong> neu, <strong><?php echo $dbSaveResult['updated']; ?></strong> aktualisiert</div>
+                <?php elseif (!USE_DB): ?>
+                    <div style="color: #ff9800;">DB: deaktiviert</div>
+                <?php endif; ?>
             </div>
             <div class="last-update">Letzte Aktualisierung: <strong><span id="lastUpdate">-</span></strong></div>
         </div>
@@ -403,6 +679,7 @@ try {
                                 data-decimal="<?php echo $point['decimal']; ?>"
                                 data-minvalue="<?php echo $point['minValue']; ?>"
                                 data-maxvalue="<?php echo $point['maxValue']; ?>"
+                                data-description="<?php echo htmlspecialchars($point['description']); ?>"
                                 onmouseenter="showTooltip(event, this)"
                                 onmouseleave="hideTooltip()">
                                 <td class="checkbox-cell"><input type="checkbox" class="row-checkbox" onchange="updateSelectAllState()"></td>
@@ -433,11 +710,14 @@ try {
         let autoUpdateEnabled = true;
         let updateInterval = null;
         const hideValues = <?php echo json_encode(HIDE_VALUES); ?>;
+        const apiUpdateInterval = <?php echo API_UPDATE_INTERVAL; ?>; // Intervall aus PHP Config
         
         function showTooltip(event, row) {
             if (!document.getElementById('showTooltips').checked) return;
             const tooltip = document.getElementById('rowTooltip');
+            const description = row.dataset.description || '-';
             tooltip.innerHTML = `
+                <div class="tooltip-row"><span class="tooltip-label">Description:</span><span class="tooltip-value">${description}</span></div>
                 <div class="tooltip-row"><span class="tooltip-label">Variable Type:</span><span class="tooltip-value">${row.dataset.variabletype}</span></div>
                 <div class="tooltip-row"><span class="tooltip-label">Variable Size:</span><span class="tooltip-value">${row.dataset.variablesize}</span></div>
                 <div class="tooltip-row"><span class="tooltip-label">Divisor:</span><span class="tooltip-value">${row.dataset.divisor}</span></div>
@@ -554,7 +834,8 @@ try {
                     divisor: point.divisor,
                     decimal: point.decimal,
                     minvalue: point.minValue,
-                    maxvalue: point.maxValue
+                    maxvalue: point.maxValue,
+                    description: point.description || ''
                 }).forEach(([k, v]) => row.dataset[k] = v);
                 
                 row.onmouseenter = e => showTooltip(e, row);
