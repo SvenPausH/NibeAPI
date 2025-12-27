@@ -1,7 +1,7 @@
 <?php
 /**
- * API Daten Abruf mit Auto-Refresh - Version Version 3.0.47
- * Hauptdatei: index.php
+ * API Daten Abruf mit Auto-Refresh - Version 3.1.50
+ * Hauptdatei: nibe49.php
  */
 
 // UTF-8 Encoding sicherstellen
@@ -72,13 +72,11 @@ function getDbConnection() {
 
 /**
  * Beschreibbare Datenpunkte in Datenbank speichern/aktualisieren
- * Wird nur beim initialen Aufruf ausgeführt
  */
 function saveWritableDatapoints($datapoints) {
     try {
         $pdo = getDbConnection();
         
-        // Prepared Statements für Insert und Update
         $checkStmt = $pdo->prepare("SELECT id FROM nibe_datenpunkte WHERE api_id = ?");
         $insertStmt = $pdo->prepare("
             INSERT INTO nibe_datenpunkte (api_id, modbus_id, title, modbus_register_type) 
@@ -94,27 +92,23 @@ function saveWritableDatapoints($datapoints) {
         $updateCount = 0;
         
         foreach ($datapoints as $point) {
-            // Nur beschreibbare Datenpunkte speichern
             if (!isset($point['isWritable']) || !$point['isWritable']) {
                 continue;
             }
             
             $apiId = $point['variableid'];
             $modbusId = $point['modbusregisterid'];
-            $title = substr($point['title'], 0, 150); // Max 150 Zeichen laut DB-Schema
-            $registerType = substr($point['modbusregistertype'], 0, 30); // Max 30 Zeichen
+            $title = substr($point['title'], 0, 150);
+            $registerType = substr($point['modbusregistertype'], 0, 30);
             
-            // Prüfen ob Datenpunkt bereits existiert
             $checkStmt->execute([$apiId]);
             $exists = $checkStmt->fetch();
             
             if ($exists) {
-                // Update
                 $updateStmt->execute([$modbusId, $title, $registerType, $apiId]);
                 $updateCount++;
                 debugLog("Datenpunkt aktualisiert", ['api_id' => $apiId, 'title' => $title], 'DB');
             } else {
-                // Insert
                 $insertStmt->execute([$apiId, $modbusId, $title, $registerType]);
                 $insertCount++;
                 debugLog("Datenpunkt neu eingefügt", ['api_id' => $apiId, 'title' => $title], 'DB');
@@ -142,7 +136,6 @@ function logValueChanges($datapoints) {
     try {
         $pdo = getDbConnection();
         
-        // Prepared Statements
         $getDatapointIdStmt = $pdo->prepare("SELECT id FROM nibe_datenpunkte WHERE api_id = ?");
         $getLastValueStmt = $pdo->prepare("
             SELECT wert 
@@ -152,49 +145,45 @@ function logValueChanges($datapoints) {
             LIMIT 1
         ");
         $insertLogStmt = $pdo->prepare("
-            INSERT INTO nibe_datenpunkte_log (nibe_datenpunkte_id, wert, cwna) 
-            VALUES (?, ?, ?)
+            INSERT INTO nibe_datenpunkte_log (nibe_datenpunkte_id, wert, cwna, zeitstempel) 
+            VALUES (?, ?, ?, ?)
         ");
         
         $loggedCount = 0;
         $skippedCount = 0;
         
+        // Aktuellen Zeitstempel einmal generieren für alle Einträge
+        $zeitstempel = date('Y-m-d H:i:s');
+        
         foreach ($datapoints as $point) {
-            // Nur für Datenpunkte die in der Master-Tabelle sind (beschreibbare)
             $apiId = $point['variableid'];
-            $rawValue = $point['rawvalue']; // Integer-Wert ohne Divisor
+            $rawValue = $point['rawvalue'];
             
-            // Datenpunkt-ID aus Master-Tabelle holen
             $getDatapointIdStmt->execute([$apiId]);
             $datenpunkt = $getDatapointIdStmt->fetch();
             
             if (!$datenpunkt) {
-                // Datenpunkt nicht in Master-Tabelle (nicht beschreibbar)
                 continue;
             }
             
             $datenpunktId = $datenpunkt['id'];
             
-            // Letzten Wert aus Log holen
             $getLastValueStmt->execute([$datenpunktId]);
             $lastLog = $getLastValueStmt->fetch();
             
-            // Prüfen ob API ID in NO_DB_UPDATE_APIID Liste ist
             $isInNoUpdateList = in_array($apiId, NO_DB_UPDATE_APIID);
             
             if (!$lastLog) {
-                // Kein vorheriger Eintrag - initialen Wert IMMER schreiben (auch wenn in NO_DB_UPDATE_APIID)
-                $insertLogStmt->execute([$datenpunktId, $rawValue, '']);
+                $insertLogStmt->execute([$datenpunktId, $rawValue, '', $zeitstempel]);
                 $loggedCount++;
                 debugLog("Initialer Wert geloggt", [
                     'api_id' => $apiId,
                     'datenpunkt_id' => $datenpunktId,
-                    'wert' => $rawValue
+                    'wert' => $rawValue,
+                    'zeitstempel' => $zeitstempel
                 ], 'DB_LOG');
             } elseif ($lastLog['wert'] != $rawValue) {
-                // Wert hat sich geändert
                 if ($isInNoUpdateList) {
-                    // API ID ist in NO_DB_UPDATE_APIID - NICHT loggen
                     $skippedCount++;
                     debugLog("Wertänderung NICHT geloggt (in NO_DB_UPDATE_APIID)", [
                         'api_id' => $apiId,
@@ -203,14 +192,14 @@ function logValueChanges($datapoints) {
                         'neuer_wert' => $rawValue
                     ], 'DB_LOG');
                 } else {
-                    // Normal loggen
-                    $insertLogStmt->execute([$datenpunktId, $rawValue, '']);
+                    $insertLogStmt->execute([$datenpunktId, $rawValue, '', $zeitstempel]);
                     $loggedCount++;
                     debugLog("Wertänderung geloggt", [
                         'api_id' => $apiId,
                         'datenpunkt_id' => $datenpunktId,
                         'alter_wert' => $lastLog['wert'],
-                        'neuer_wert' => $rawValue
+                        'neuer_wert' => $rawValue,
+                        'zeitstempel' => $zeitstempel
                     ], 'DB_LOG');
                 }
             }
@@ -233,14 +222,11 @@ function logValueChanges($datapoints) {
 
 /**
  * Manuell geschriebenen Wert in Log schreiben
- * NO_DB_UPDATE_APIID wird hier IGNORIERT
- * cwna Spalte wird mit "X" gefüllt
  */
 function logManualWrite($apiId, $rawValue) {
     try {
         $pdo = getDbConnection();
         
-        // Datenpunkt-ID aus Master-Tabelle holen
         $stmt = $pdo->prepare("SELECT id FROM nibe_datenpunkte WHERE api_id = ?");
         $stmt->execute([$apiId]);
         $datenpunkt = $stmt->fetch();
@@ -252,18 +238,21 @@ function logManualWrite($apiId, $rawValue) {
         
         $datenpunktId = $datenpunkt['id'];
         
-        // Wert in Log schreiben - cwna mit "X" füllen (Change Was Not Automatic)
+        // Aktuellen Zeitstempel generieren
+        $zeitstempel = date('Y-m-d H:i:s');
+        
         $insertStmt = $pdo->prepare("
-            INSERT INTO nibe_datenpunkte_log (nibe_datenpunkte_id, wert, cwna) 
-            VALUES (?, ?, 'X')
+            INSERT INTO nibe_datenpunkte_log (nibe_datenpunkte_id, wert, cwna, zeitstempel) 
+            VALUES (?, ?, 'X', ?)
         ");
-        $insertStmt->execute([$datenpunktId, $rawValue]);
+        $insertStmt->execute([$datenpunktId, $rawValue, $zeitstempel]);
         
         debugLog("Manueller Schreibvorgang geloggt", [
             'api_id' => $apiId,
             'datenpunkt_id' => $datenpunktId,
             'wert' => $rawValue,
             'cwna' => 'X',
+            'zeitstempel' => $zeitstempel,
             'no_db_update_list_ignored' => in_array($apiId, NO_DB_UPDATE_APIID) ? 'ja' : 'nein'
         ], 'DB_LOG');
         
@@ -377,7 +366,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'write') {
         curl_close($ch);
         
         if ($httpCode >= 200 && $httpCode < 300) {
-            // Erfolgreich geschrieben - in Log schreiben (falls DB aktiviert)
             if (USE_DB) {
                 try {
                     logManualWrite($variableId, $newValue);
@@ -392,6 +380,176 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'write') {
         }
         
     } catch (Exception $e) {
+        echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// AJAX-Request für History-Daten
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'history') {
+    header('Content-Type: application/json; charset=utf-8');
+    
+    if (!USE_DB) {
+        echo json_encode(['success' => false, 'error' => 'Datenbank ist deaktiviert'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    
+    try {
+        $apiId = $_GET['apiId'] ?? null;
+        
+        if (!$apiId) {
+            throw new Exception('API ID fehlt');
+        }
+        
+        $pdo = getDbConnection();
+        
+        $stmt = $pdo->prepare("SELECT id FROM nibe_datenpunkte WHERE api_id = ?");
+        $stmt->execute([$apiId]);
+        $datenpunkt = $stmt->fetch();
+        
+        if (!$datenpunkt) {
+            throw new Exception('Datenpunkt nicht gefunden');
+        }
+        
+        $historyStmt = $pdo->prepare("
+            SELECT id, wert, cwna, zeitstempel 
+            FROM nibe_datenpunkte_log 
+            WHERE nibe_datenpunkte_id = ? 
+            ORDER BY zeitstempel DESC 
+            LIMIT ?
+        ");
+        $historyStmt->execute([$datenpunkt['id'], API_MAX_HISTORY]);
+        $historyData = $historyStmt->fetchAll();
+        
+        echo json_encode([
+            'success' => true,
+            'history' => $historyData,
+            'apiId' => $apiId
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
+}
+
+// AJAX-Request für Import
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'import') {
+    header('Content-Type: application/json; charset=utf-8');
+    
+    if (!USE_DB) {
+        echo json_encode(['success' => false, 'error' => 'Datenbank ist deaktiviert'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    
+    try {
+        $input = json_decode(file_get_contents('php://input'), true);
+        $fileContent = $input['fileContent'] ?? null;
+        
+        if (!$fileContent) {
+            throw new Exception('Keine Datei-Inhalte erhalten');
+        }
+        
+        debugLog("Import gestartet", ['fileName' => $input['fileName'] ?? 'unknown'], 'IMPORT');
+        
+        $lines = explode("\n", $fileContent);
+        $totalRecords = count($lines) - 1;
+        $importedRecords = 0;
+        $failedRecords = [];
+        $newMasterRecords = 0;
+        
+        $pdo = getDbConnection();
+        
+        $checkMasterStmt = $pdo->prepare("SELECT id FROM nibe_datenpunkte WHERE api_id = ?");
+        $insertMasterStmt = $pdo->prepare("
+            INSERT INTO nibe_datenpunkte (api_id, modbus_id, title, modbus_register_type) 
+            VALUES (?, -1, ?, '-')
+        ");
+        $insertLogStmt = $pdo->prepare("
+            INSERT INTO nibe_datenpunkte_log (nibe_datenpunkte_id, wert, cwna, zeitstempel) 
+            VALUES (?, ?, 'I', ?)
+        ");
+        
+        for ($i = 1; $i < count($lines); $i++) {
+            $line = trim($lines[$i]);
+            if (empty($line)) {
+                continue;
+            }
+            
+            $parts = explode("\t", $line);
+            
+            if (count($parts) < 4) {
+                $failedRecords[] = [
+                    'line' => $i + 1,
+                    'reason' => 'Unvollständige Daten (weniger als 4 Spalten)'
+                ];
+                continue;
+            }
+            
+            $zeitStr = trim($parts[0]);
+            $tag = trim($parts[1]);
+            $apiId = trim($parts[2]);
+            $wert = trim($parts[3]);
+            
+            try {
+                $timestamp = new DateTime($zeitStr);
+                $zeitstempel = $timestamp->format('Y-m-d H:i:s');
+            } catch (Exception $e) {
+                $failedRecords[] = [
+                    'line' => $i + 1,
+                    'reason' => 'Ungültiges Zeitformat: ' . $zeitStr
+                ];
+                continue;
+            }
+            
+            $checkMasterStmt->execute([$apiId]);
+            $master = $checkMasterStmt->fetch();
+            
+            if (!$master) {
+                try {
+                    $insertMasterStmt->execute([$apiId, $tag]);
+                    $datenpunktId = $pdo->lastInsertId();
+                    $newMasterRecords++;
+                    debugLog("Neuer Master-Eintrag", ['api_id' => $apiId, 'title' => $tag], 'IMPORT');
+                } catch (PDOException $e) {
+                    $failedRecords[] = [
+                        'line' => $i + 1,
+                        'reason' => 'Fehler beim Anlegen Master-Eintrag: ' . $e->getMessage()
+                    ];
+                    continue;
+                }
+            } else {
+                $datenpunktId = $master['id'];
+            }
+            
+            try {
+                $insertLogStmt->execute([$datenpunktId, (int)$wert, $zeitstempel]);
+                $importedRecords++;
+            } catch (PDOException $e) {
+                $failedRecords[] = [
+                    'line' => $i + 1,
+                    'reason' => 'Fehler beim Schreiben Log: ' . $e->getMessage()
+                ];
+            }
+        }
+        
+        debugLog("Import abgeschlossen", [
+            'total' => $totalRecords,
+            'imported' => $importedRecords,
+            'failed' => count($failedRecords),
+            'newMaster' => $newMasterRecords
+        ], 'IMPORT');
+        
+        echo json_encode([
+            'success' => true,
+            'totalRecords' => $totalRecords,
+            'importedRecords' => $importedRecords,
+            'failedRecords' => $failedRecords,
+            'newMasterRecords' => $newMasterRecords
+        ], JSON_UNESCAPED_UNICODE);
+        
+    } catch (Exception $e) {
+        debugLog("Import-Fehler", ['error' => $e->getMessage()], 'ERROR');
         echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
     }
     exit;
@@ -438,12 +596,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'fetch') {
             ];
         }
         
-        // Wertänderungen in Log-Tabelle schreiben (falls DB aktiviert)
         if (USE_DB) {
             try {
                 logValueChanges($data);
             } catch (Exception $e) {
-                // Fehler loggen, aber AJAX-Request nicht abbrechen
                 debugLog("Fehler beim Loggen der Wertänderungen (AJAX)", ['error' => $e->getMessage()], 'ERROR');
             }
         }
@@ -497,18 +653,15 @@ try {
         ];
     }
     
-    // Beschreibbare Datenpunkte in Master-Tabelle speichern (nur beim initialen Aufruf und falls DB aktiviert)
     if (USE_DB) {
         try {
             $dbSaveResult = saveWritableDatapoints($data);
             debugLog("Initiales Speichern in Master-Tabelle erfolgreich", $dbSaveResult, 'DB');
             
-            // Initiale Werte in Log-Tabelle schreiben
             logValueChanges($data);
             debugLog("Initiale Werte in Log-Tabelle geschrieben", null, 'DB_LOG');
             
         } catch (Exception $e) {
-            // Fehler loggen, aber Seite nicht abbrechen
             debugLog("Fehler beim initialen DB-Speichern", ['error' => $e->getMessage()], 'ERROR');
         }
     } else {
@@ -525,7 +678,7 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>API Datenpunkte - Live v3.0.47</title>
+    <title>API Datenpunkte - Live v3.1.50 mit History</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f5f5; padding: 20px; }
@@ -551,6 +704,8 @@ try {
         .btn-toggle { background: #4CAF50; color: white; }
         .btn-toggle:hover { background: #45a049; }
         .btn-toggle.paused { background: #ff9800; }
+        .btn-import { background: #9C27B0; color: white; }
+        .btn-import:hover { background: #7B1FA2; }
         .info-bar { background: #e7f3ff; padding: 12px; border-left: 4px solid #2196F3; margin-bottom: 20px; border-radius: 4px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; }
         .info-left { display: flex; gap: 20px; flex-wrap: wrap; }
         .last-update { font-size: 13px; color: #666; }
@@ -571,12 +726,6 @@ try {
         .value-display { flex: 1; }
         .btn-edit { padding: 4px 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.3s; }
         .btn-edit:hover { background: #1976D2; }
-        .edit-input { width: 150px; padding: 6px; border: 2px solid #2196F3; border-radius: 4px; font-size: 14px; }
-        .btn-save { padding: 4px 12px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; margin-right: 4px; }
-        .btn-save:hover { background: #45a049; }
-        .btn-cancel { padding: 4px 12px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: 600; }
-        .btn-cancel:hover { background: #da190b; }
-        .saving-indicator { color: #2196F3; font-size: 12px; font-style: italic; }
         .checkbox-cell { text-align: center; width: 40px; }
         .row-checkbox { cursor: pointer; width: 18px; height: 18px; }
         .row-tooltip { position: fixed; background: #333; color: white; padding: 10px; border-radius: 6px; font-size: 12px; z-index: 1000; display: none; min-width: 250px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); pointer-events: none; }
@@ -587,11 +736,436 @@ try {
         .tooltip-label { font-weight: 600; color: #aaa; }
         .tooltip-value { color: #fff; }
         .no-data { text-align: center; padding: 40px; color: #999; font-style: italic; }
+        
+        /* History Modal */
+        .history-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .history-modal.show {
+            display: flex;
+        }
+        
+        .history-content {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #2196F3;
+        }
+        
+        .history-header h2 {
+            color: #333;
+            font-size: 24px;
+            margin: 0;
+        }
+        
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        
+        .history-table thead {
+            background: #2196F3;
+            color: white;
+        }
+        
+        .history-table th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        .history-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        .history-table tbody tr:hover {
+            background: #f5f5f5;
+        }
+        
+        .history-table tbody tr:nth-child(even) {
+            background: #fafafa;
+        }
+        
+        .history-table tbody tr:nth-child(even):hover {
+            background: #f0f0f0;
+        }
+        
+        .btn-undo {
+            padding: 6px 12px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.3s;
+        }
+        
+        .btn-undo:hover {
+            background: #45a049;
+        }
+        
+        .btn-close-history {
+            padding: 10px 30px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        
+        .btn-close-history:hover {
+            background: #da190b;
+        }
+        
+        .history-footer {
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+        }
+        
+        .cwna-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #FF9800;
+            color: white;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        
+        .cwna-badge.import {
+            background: #2196F3;
+        }
+        
+        /* Import Modal */
+        .import-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .import-modal.show {
+            display: flex;
+        }
+        
+        .import-content {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .import-header {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #9C27B0;
+        }
+        
+        .import-header h2 {
+            color: #333;
+            font-size: 24px;
+            margin: 0;
+        }
+        
+        .file-upload-area {
+            border: 2px dashed #9C27B0;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            margin: 20px 0;
+            background: #f9f9f9;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .file-upload-area:hover {
+            background: #f0f0f0;
+        }
+        
+        .file-upload-area.dragover {
+            background: #e0e0e0;
+            border-color: #7B1FA2;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .import-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        
+        .btn-import-ok {
+            padding: 10px 30px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        
+        .btn-import-ok:hover {
+            background: #45a049;
+        }
+        
+        .btn-import-ok:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .btn-import-cancel {
+            padding: 10px 30px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        
+        .btn-import-cancel:hover {
+            background: #da190b;
+        }
+        
+        .import-result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 6px;
+            background: #e7f3ff;
+            border-left: 4px solid #2196F3;
+        }
+        
+        .import-result h3 {
+            margin: 0 0 10px 0;
+            color: #1976D2;
+        }
+        
+        .import-result.success {
+            background: #e8f5e9;
+            border-left-color: #4CAF50;
+        }
+        
+        .import-result.success h3 {
+            color: #2E7D32;
+        }
+        
+        .import-result.error {
+            background: #ffebee;
+            border-left-color: #f44336;
+        }
+        
+        .import-result.error h3 {
+            color: #c62828;
+        }
+        
+        .failed-records {
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        
+        .failed-record {
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        
+        /* Edit Modal */
+        .edit-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .edit-modal.show {
+            display: flex;
+        }
+        
+        .edit-content {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        
+        .edit-header {
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #2196F3;
+        }
+        
+        .edit-header h2 {
+            color: #333;
+            font-size: 24px;
+            margin: 0 0 10px 0;
+        }
+        
+        .edit-info {
+            color: #666;
+            font-size: 14px;
+            margin: 5px 0;
+        }
+        
+        .edit-form {
+            margin: 20px 0;
+        }
+        
+        .edit-form-group {
+            margin-bottom: 20px;
+        }
+        
+        .edit-form-group label {
+            display: block;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        
+        .edit-form-group input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #2196F3;
+            border-radius: 4px;
+            font-size: 16px;
+            font-weight: 500;
+        }
+        
+        .edit-form-group input[type="number"]:focus {
+            outline: none;
+            border-color: #1976D2;
+            box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+        }
+        
+        .edit-limits {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        .edit-current-value {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+        
+        .edit-current-value strong {
+            color: #2196F3;
+        }
+        
+        .edit-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 25px;
+        }
+        
+        .btn-edit-save {
+            padding: 12px 30px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        
+        .btn-edit-save:hover {
+            background: #45a049;
+        }
+        
+        .btn-edit-cancel {
+            padding: 12px 30px;
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        
+        .btn-edit-cancel:hover {
+            background: #da190b;
+        }
+        
+        .edit-saving {
+            text-align: center;
+            padding: 20px;
+            color: #2196F3;
+            font-size: 16px;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1><span class="live-indicator" id="liveIndicator"></span>📊 API Datenpunkte Übersicht - Live v3.0.47</h1>
+        <h1><span class="live-indicator" id="liveIndicator"></span>📊 API Datenpunkte Übersicht - Live 3.1.50 mit History</h1>
         
         <div id="errorContainer"></div>
         
@@ -635,6 +1209,9 @@ try {
                 <div class="button-group">
                     <button class="btn-reset" onclick="resetFilters()">Zurücksetzen</button>
                     <button class="btn-toggle" id="toggleButton" onclick="toggleAutoUpdate()">Pause</button>
+                    <?php if (USE_DB): ?>
+                        <button class="btn-import" onclick="showImportDialog()">📥 Import Nibe logs</button>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -655,21 +1232,24 @@ try {
         <div class="table-wrapper">
             <div class="row-tooltip" id="rowTooltip"></div>
             <table id="dataTable">
-                <thead>
+                 <thead>
                     <tr>
                         <th class="checkbox-cell"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()" title="Alle auswählen/abwählen"></th>
                         <th class="sortable" onclick="sortTable(1)">API ID</th>
                         <th class="sortable" onclick="sortTable(2)">Modbus ID</th>
                         <th class="sortable" onclick="sortTable(3)">Title</th>
-                        <th class="sortable" onclick="sortTable(4)">Modbus Register Type</th>
+                        <th class="sortable" onclick="sortTable(4)">Modbus RT</th>
                         <th class="sortable" onclick="sortTable(5)">Value</th>
+                        <?php if (USE_DB): ?>
+                            <th>History</th>
+                        <?php endif; ?>
                     </tr>
                 </thead>
                 <tbody id="tableBody">
                     <?php if ($error): ?>
-                        <tr><td colspan="6" class="no-data error">Fehler: <?php echo htmlspecialchars($error); ?></td></tr>
+                        <tr><td colspan="<?php echo USE_DB ? '7' : '6'; ?>" class="no-data error">Fehler: <?php echo htmlspecialchars($error); ?></td></tr>
                     <?php elseif (empty($data)): ?>
-                        <tr><td colspan="6" class="no-data">Keine Daten verfügbar</td></tr>
+                        <tr><td colspan="<?php echo USE_DB ? '7' : '6'; ?>" class="no-data">Keine Daten verfügbar</td></tr>
                     <?php else: ?>
                         <?php foreach ($data as $point): ?>
                             <tr data-variableid="<?php echo $point['variableid']; ?>"
@@ -686,17 +1266,41 @@ try {
                                 <td><?php echo $point['variableid']; ?></td>
                                 <td><?php echo $point['modbusregisterid']; ?></td>
                                 <td><?php echo htmlspecialchars($point['title']); ?></td>
-                                <td><?php echo $point['modbusregistertype']; ?></td>
-                                <td class="value-cell">
+                                <td><?php 
+                                    $rt = $point['modbusregistertype'];
+                                    if ($rt === 'MODBUS_INPUT_REGISTER') {
+                                        echo 'I';
+                                    } elseif ($rt === 'MODBUS_HOLDING_REGISTER') {
+                                        echo 'H';
+                                    } else {
+                                        echo htmlspecialchars($rt);
+                                    }
+                                ?></td>
+                                <td class="value-cell" 
+                                    data-rawvalue="<?php echo $point['rawvalue']; ?>"
+                                    data-divisor="<?php echo $point['divisor']; ?>"
+                                    data-decimal="<?php echo $point['decimal']; ?>"
+                                    data-unit="<?php echo htmlspecialchars($point['unit']); ?>">
                                     <?php if ($point['modbusregistertype'] === 'MODBUS_HOLDING_REGISTER' && $point['isWritable']): ?>
                                         <div class="editable-value">
                                             <span class="value-display"><?php echo htmlspecialchars($point['value']); ?></span>
-                                            <button class="btn-edit" onclick="editValue(this)">✏️</button>
+                                            <button class="btn-edit" onclick="editValue(<?php echo $point['variableid']; ?>, '<?php echo htmlspecialchars($point['title'], ENT_QUOTES); ?>')">✏️</button>
                                         </div>
                                     <?php else: ?>
                                         <?php echo htmlspecialchars($point['value']); ?>
                                     <?php endif; ?>
                                 </td>
+                                <?php if (USE_DB): ?>
+                                    <td style="text-align: center;">
+                                        <?php if ($point['modbusregistertype'] === 'MODBUS_HOLDING_REGISTER' && $point['isWritable']): ?>
+                                            <button class="btn-edit" onclick="showHistory(<?php echo $point['variableid']; ?>, '<?php echo htmlspecialchars($point['title'], ENT_QUOTES); ?>')">
+                                                📜
+                                            </button>
+                                        <?php else: ?>
+                                            -
+                                        <?php endif; ?>
+                                    </td>
+                                <?php endif; ?>
                             </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -705,13 +1309,314 @@ try {
         </div>
     </div>
     
+    <!-- History Modal -->
+    <div class="history-modal" id="historyModal">
+        <div class="history-content">
+            <div class="history-header">
+                <h2>📜 Werteverlauf</h2>
+                <span id="historyTitle" style="color: #666;"></span>
+            </div>
+            <table class="history-table">
+                <thead>
+                    <tr>
+                        <th>Zeitstempel</th>
+                        <th>Wert</th>
+                        <th>Manuell</th>
+                        <th>Aktion</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                </tbody>
+            </table>
+            <div class="history-footer">
+                <button class="btn-close-history" onclick="closeHistory()">✖ Schließen</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Import Modal -->
+    <div class="import-modal" id="importModal">
+        <div class="import-content">
+            <div class="import-header">
+                <h2>📥 Nibe Logs Importieren</h2>
+            </div>
+            
+            <div id="importUploadArea">
+                <div class="file-upload-area" id="fileUploadArea" onclick="document.getElementById('fileInput').click()">
+                    <p style="font-size: 18px; margin: 10px 0;">📄 Datei auswählen oder hierher ziehen</p>
+                    <p style="color: #666; font-size: 14px;">Tab-getrennte Textdatei (.txt, .csv)</p>
+                    <p id="selectedFileName" style="margin-top: 10px; font-weight: bold; color: #9C27B0;"></p>
+                </div>
+                <input type="file" id="fileInput" class="file-input" accept=".txt,.csv,.log" onchange="handleFileSelect(event)">
+                
+                <div class="import-buttons">
+                    <button class="btn-import-ok" id="btnImportOk" onclick="processImport()" disabled>✔ OK</button>
+                    <button class="btn-import-cancel" onclick="closeImportDialog()">✗ Abbrechen</button>
+                </div>
+            </div>
+            
+            <div id="importResult" style="display: none;">
+            </div>
+        </div>
+    </div>
+    
+    <!-- Edit Modal -->
+    <div class="edit-modal" id="editModal">
+        <div class="edit-content">
+            <div class="edit-header">
+                <h2>✏️ Wert bearbeiten</h2>
+                <div class="edit-info" id="editTitle"></div>
+                <div class="edit-info" id="editApiId"></div>
+            </div>
+            
+            <div id="editFormArea">
+                <div class="edit-current-value">
+                    Aktueller Wert: <strong id="editCurrentValue"></strong>
+                </div>
+                
+                <div class="edit-form">
+                    <div class="edit-form-group">
+                        <label for="editInput">Neuer Wert</label>
+                        <input type="number" id="editInput" step="any" placeholder="Neuen Wert eingeben">
+                        <div class="edit-limits" id="editLimits"></div>
+                    </div>
+                </div>
+                
+                <div class="edit-buttons">
+                    <button class="btn-edit-save" onclick="saveEditValue()">💾 Speichern</button>
+                    <button class="btn-edit-cancel" onclick="closeEditDialog()">✖ Abbrechen</button>
+                </div>
+            </div>
+            
+            <div id="editSaving" class="edit-saving" style="display: none;">
+                💾 Speichere Wert...
+            </div>
+        </div>
+    </div>
+    
     <script>
         let tableData = <?php echo json_encode($data, JSON_UNESCAPED_UNICODE); ?>;
         let autoUpdateEnabled = true;
         let updateInterval = null;
         const hideValues = <?php echo json_encode(HIDE_VALUES); ?>;
-        const apiUpdateInterval = <?php echo API_UPDATE_INTERVAL; ?>; // Intervall aus PHP Config
+        const apiUpdateInterval = <?php echo API_UPDATE_INTERVAL; ?>;
+        const USE_DB_ENABLED = <?php echo USE_DB ? 'true' : 'false'; ?>;
+        window.USE_DB_ENABLED = USE_DB_ENABLED;
         
+        // Import-Funktionen
+        let selectedFile = null;
+        
+        // Edit Modal Variablen
+        let currentEditVariableId = null;
+        let currentEditValueCell = null;
+        
+        function showImportDialog() {
+            document.getElementById('importModal').classList.add('show');
+            document.getElementById('importUploadArea').style.display = 'block';
+            document.getElementById('importResult').style.display = 'none';
+            document.getElementById('selectedFileName').textContent = '';
+            document.getElementById('btnImportOk').disabled = true;
+            selectedFile = null;
+        }
+        
+        function closeImportDialog() {
+            document.getElementById('importModal').classList.remove('show');
+            selectedFile = null;
+        }
+        
+        function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (file) {
+                selectedFile = file;
+                document.getElementById('selectedFileName').textContent = '📄 ' + file.name;
+                document.getElementById('btnImportOk').disabled = false;
+            }
+        }
+        
+        async function processImport() {
+            if (!selectedFile) {
+                alert('Bitte wählen Sie eine Datei aus');
+                return;
+            }
+            
+            document.getElementById('btnImportOk').disabled = true;
+            document.getElementById('btnImportOk').textContent = '⏳ Importiere...';
+            
+            try {
+                const fileContent = await selectedFile.text();
+                
+                const response = await fetch('?ajax=import', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        fileContent: fileContent,
+                        fileName: selectedFile.name
+                    })
+                });
+                
+                const result = await response.json();
+                displayImportResult(result);
+                
+            } catch (error) {
+                alert('Fehler beim Import: ' + error.message);
+                document.getElementById('btnImportOk').disabled = false;
+                document.getElementById('btnImportOk').textContent = '✔ OK';
+            }
+        }
+        
+        function displayImportResult(result) {
+            document.getElementById('importUploadArea').style.display = 'none';
+            
+            const resultDiv = document.getElementById('importResult');
+            resultDiv.style.display = 'block';
+            
+            if (result.success) {
+                let html = `
+                    <div class="import-result success">
+                        <h3>✔ Import erfolgreich abgeschlossen</h3>
+                        <p><strong>Datei enthielt:</strong> ${result.totalRecords} Datensätze</p>
+                        <p><strong>Erfolgreich importiert:</strong> ${result.importedRecords} Datensätze</p>
+                        <p><strong>Neue Master-Einträge:</strong> ${result.newMasterRecords || 0} Datensätze</p>
+                `;
+                
+                if (result.failedRecords && result.failedRecords.length > 0) {
+                    html += `
+                        <p><strong>Nicht importiert:</strong> ${result.failedRecords.length} Datensätze</p>
+                        <div class="failed-records">
+                    `;
+                    result.failedRecords.forEach(failed => {
+                        html += `<div class="failed-record">Zeile ${failed.line}: ${failed.reason}</div>`;
+                    });
+                    html += '</div>';
+                }
+                
+                html += `</div>
+                    <div class="import-buttons">
+                        <button class="btn-import-cancel" onclick="closeImportDialog()">Schließen</button>
+                    </div>
+                `;
+                
+                resultDiv.innerHTML = html;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="import-result error">
+                        <h3>✗ Import fehlgeschlagen</h3>
+                        <p>${result.error}</p>
+                    </div>
+                    <div class="import-buttons">
+                        <button class="btn-import-cancel" onclick="closeImportDialog()">Schließen</button>
+                    </div>
+                `;
+            }
+        }
+        
+        // History-Funktionen
+        async function showHistory(variableId, title) {
+            if (!USE_DB_ENABLED) {
+                alert('Datenbank-Funktionen sind deaktiviert');
+                return;
+            }
+            
+            document.getElementById('historyModal').classList.add('show');
+            document.getElementById('historyTitle').textContent = title + ' (API ID: ' + variableId + ')';
+            document.getElementById('historyTableBody').innerHTML = '<tr><td colspan="4" style="text-align: center;">Lade Daten...</td></tr>';
+            
+            try {
+                const response = await fetch('?ajax=history&apiId=' + variableId);
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayHistoryData(result.history, variableId);
+                } else {
+                    document.getElementById('historyTableBody').innerHTML = 
+                        '<tr><td colspan="4" class="no-data error">Fehler: ' + result.error + '</td></tr>';
+                }
+            } catch (error) {
+                document.getElementById('historyTableBody').innerHTML = 
+                    '<tr><td colspan="4" class="no-data error">Verbindungsfehler: ' + error.message + '</td></tr>';
+            }
+        }
+        
+        function displayHistoryData(historyData, apiId) {
+            const tbody = document.getElementById('historyTableBody');
+            
+            if (!historyData || historyData.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" class="no-data">Keine History-Daten vorhanden</td></tr>';
+                return;
+            }
+            
+            const currentPoint = tableData.find(p => p.variableid == apiId);
+            const divisor = currentPoint ? (currentPoint.divisor || 1) : 1;
+            const decimal = currentPoint ? (currentPoint.decimal || 0) : 0;
+            const unit = currentPoint ? (currentPoint.unit || '') : '';
+            
+            tbody.innerHTML = '';
+            
+            historyData.forEach(entry => {
+                const row = tbody.insertRow();
+                
+                row.insertCell(0).textContent = entry.zeitstempel;
+                
+                let displayValue = entry.wert;
+                if (divisor > 1) {
+                    displayValue = (entry.wert / divisor).toFixed(decimal).replace('.', ',');
+                }
+                displayValue += (unit ? ' ' + unit : '');
+                row.insertCell(1).textContent = displayValue;
+                
+                const manualCell = row.insertCell(2);
+                if (entry.cwna === 'X') {
+                    manualCell.innerHTML = '<span class="cwna-badge">MANUELL</span>';
+                } else if (entry.cwna === 'I') {
+                    manualCell.innerHTML = '<span class="cwna-badge import">IMPORT</span>';
+                } else {
+                    manualCell.textContent = '-';
+                }
+                
+                const actionCell = row.insertCell(3);
+                if (entry.cwna === 'X') {
+                    const undoBtn = document.createElement('button');
+                    undoBtn.className = 'btn-undo';
+                    undoBtn.textContent = '↩️ Wiederherstellen';
+                    undoBtn.onclick = () => restoreHistoryValue(apiId, entry.wert);
+                    actionCell.appendChild(undoBtn);
+                } else {
+                    actionCell.textContent = '-';
+                }
+            });
+        }
+        
+        async function restoreHistoryValue(variableId, rawValue) {
+            if (!confirm('Möchten Sie diesen Wert wirklich wiederherstellen?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('?ajax=write', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({variableId: variableId, value: rawValue})
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('✅ Wert erfolgreich wiederhergestellt');
+                    closeHistory();
+                    setTimeout(fetchData, 500);
+                } else {
+                    alert('❌ Fehler beim Wiederherstellen: ' + result.error);
+                }
+            } catch (error) {
+                alert('❌ Verbindungsfehler: ' + error.message);
+            }
+        }
+        
+        function closeHistory() {
+            document.getElementById('historyModal').classList.remove('show');
+        }
+        
+        // Tooltip-Funktionen
         function showTooltip(event, row) {
             if (!document.getElementById('showTooltips').checked) return;
             const tooltip = document.getElementById('rowTooltip');
@@ -726,25 +1631,17 @@ try {
                 <div class="tooltip-row"><span class="tooltip-label">Max Value:</span><span class="tooltip-value">${row.dataset.maxvalue}</span></div>
             `;
             
-            // Position berechnen - direkt an der Zeile
             const rect = row.getBoundingClientRect();
-            
-            // Tooltip unterhalb der Zeile positionieren
             tooltip.style.left = rect.left + 'px';
             tooltip.style.top = (rect.bottom + 5) + 'px';
-            
-            // Sicherstellen, dass Tooltip nicht aus dem Viewport läuft
             tooltip.classList.add('show');
             
-            // Überprüfen ob Tooltip rechts aus dem Viewport läuft
             const tooltipRect = tooltip.getBoundingClientRect();
             if (tooltipRect.right > window.innerWidth) {
                 tooltip.style.left = (window.innerWidth - tooltipRect.width - 10) + 'px';
             }
             
-            // Überprüfen ob Tooltip unten aus dem Viewport läuft
             if (tooltipRect.bottom > window.innerHeight) {
-                // Tooltip über der Zeile anzeigen
                 tooltip.style.top = (rect.top - tooltipRect.height - 5) + 'px';
             }
         }
@@ -770,7 +1667,7 @@ try {
         
         function startAutoUpdate() {
             if (updateInterval) clearInterval(updateInterval);
-            updateInterval = setInterval(fetchData, 10000);
+            updateInterval = setInterval(fetchData, apiUpdateInterval);
             autoUpdateEnabled = true;
             document.getElementById('toggleButton').textContent = 'Pause';
             document.getElementById('toggleButton').classList.remove('paused');
@@ -853,7 +1750,7 @@ try {
                 row.insertCell(1).textContent = point.variableid;
                 row.insertCell(2).textContent = point.modbusregisterid;
                 row.insertCell(3).textContent = point.title;
-                row.insertCell(4).textContent = point.modbusregistertype;
+                row.insertCell(4).textContent = point.modbusregistertype === 'MODBUS_INPUT_REGISTER' ? 'I' : (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' ? 'H' : point.modbusregistertype);
                 
                 const valueCell = row.insertCell(5);
                 valueCell.className = 'value-cell';
@@ -867,7 +1764,7 @@ try {
                     const btn = document.createElement('button');
                     btn.className = 'btn-edit';
                     btn.textContent = '✏️';
-                    btn.onclick = () => editValue(btn);
+                    btn.onclick = () => editValue(point.variableid, point.title);
                     div.appendChild(span);
                     div.appendChild(btn);
                     valueCell.appendChild(div);
@@ -877,6 +1774,21 @@ try {
                     valueCell.dataset.unit = point.unit;
                 } else {
                     valueCell.textContent = point.value;
+                }
+                
+                if (USE_DB_ENABLED) {
+                    const historyCell = row.insertCell();
+                    historyCell.style.textAlign = 'center';
+                    
+                    if (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' && point.isWritable) {
+                        const historyBtn = document.createElement('button');
+                        historyBtn.className = 'btn-edit';
+                        historyBtn.textContent = '📜';
+                        historyBtn.onclick = () => showHistory(point.variableid, point.title);
+                        historyCell.appendChild(historyBtn);
+                    } else {
+                        historyCell.textContent = '-';
+                    }
                 }
                 
                 if (oldValues[point.variableid] && oldValues[point.variableid] !== point.value) {
@@ -891,49 +1803,80 @@ try {
             updateSelectAllState();
         }
         
-        function editValue(button) {
-            const valueCell = button.closest('.value-cell');
-            const editableDiv = valueCell.querySelector('.editable-value');
-            const valueSpan = editableDiv.querySelector('.value-display');
-            const currentValue = valueSpan.textContent;
-            const variableId = valueCell.closest('tr').dataset.variableid;
+        function editValue(variableId, title) {
+            // Finde den Datenpunkt
+            const point = tableData.find(p => p.variableid == variableId);
+            if (!point) {
+                alert('Datenpunkt nicht gefunden');
+                return;
+            }
+            
+            // Finde die entsprechende Zeile in der Tabelle
+            const row = document.querySelector(`tr[data-variableid="${variableId}"]`);
+            if (!row) {
+                alert('Zeile nicht gefunden');
+                return;
+            }
+            
+            const valueCell = row.cells[5];
+            
+            // Speichere Referenzen
+            currentEditVariableId = variableId;
+            currentEditValueCell = valueCell;
+            
+            // Extrahiere numerischen Wert
+            const currentValue = valueCell.querySelector('.value-display').textContent;
             const numericValue = currentValue.replace(/[^\d,.-]/g, '').replace(',', '.');
             
-            const input = document.createElement('input');
-            input.type = 'number';
-            input.step = 'any';
-            input.className = 'edit-input';
-            input.value = numericValue;
+            // Fülle Modal mit Daten
+            document.getElementById('editTitle').textContent = '📊 ' + title;
+            document.getElementById('editApiId').textContent = 'API ID: ' + variableId;
+            document.getElementById('editCurrentValue').textContent = currentValue;
+            document.getElementById('editInput').value = numericValue;
             
-            const saveBtn = document.createElement('button');
-            saveBtn.className = 'btn-save';
-            saveBtn.textContent = '💾 Speichern';
-            saveBtn.onclick = () => saveValue(variableId, valueCell, input.value);
+            // Min/Max Limits anzeigen
+            const minValue = row.dataset.minvalue;
+            const maxValue = row.dataset.maxvalue;
+            if (minValue && maxValue && minValue != 0 && maxValue != 0) {
+                const divisor = parseInt(valueCell.dataset.divisor) || 1;
+                const decimal = parseInt(valueCell.dataset.decimal) || 0;
+                const displayMin = divisor > 1 ? (minValue / divisor).toFixed(decimal) : minValue;
+                const displayMax = divisor > 1 ? (maxValue / divisor).toFixed(decimal) : maxValue;
+                document.getElementById('editLimits').textContent = `Erlaubter Bereich: ${displayMin} bis ${displayMax}`;
+            } else {
+                document.getElementById('editLimits').textContent = '';
+            }
             
-            const cancelBtn = document.createElement('button');
-            cancelBtn.className = 'btn-cancel';
-            cancelBtn.textContent = '❌ Abbrechen';
-            cancelBtn.onclick = () => cancelEdit(valueCell, currentValue);
+            // Zeige Modal
+            document.getElementById('editFormArea').style.display = 'block';
+            document.getElementById('editSaving').style.display = 'none';
+            document.getElementById('editModal').classList.add('show');
             
-            input.onkeypress = e => e.key === 'Enter' && saveValue(variableId, valueCell, input.value);
-            input.onkeydown = e => e.key === 'Escape' && cancelEdit(valueCell, currentValue);
-            
-            editableDiv.innerHTML = '';
-            editableDiv.appendChild(input);
-            editableDiv.appendChild(saveBtn);
-            editableDiv.appendChild(cancelBtn);
-            
-            input.focus();
-            input.select();
+            // Focus auf Input
+            setTimeout(() => {
+                const input = document.getElementById('editInput');
+                input.focus();
+                input.select();
+            }, 100);
         }
         
-        async function saveValue(variableId, valueCell, newValue) {
-            const editableDiv = valueCell.querySelector('.editable-value');
+        async function saveEditValue() {
+            const newValue = document.getElementById('editInput').value;
+            
+            if (!newValue || newValue.trim() === '') {
+                alert('Bitte geben Sie einen Wert ein');
+                return;
+            }
+            
+            const valueCell = currentEditValueCell;
+            const variableId = currentEditVariableId;
             const divisor = parseInt(valueCell.dataset.divisor) || 1;
             const unit = valueCell.dataset.unit || '';
             const decimal = parseInt(valueCell.dataset.decimal) || 0;
             
-            editableDiv.innerHTML = '<span class="saving-indicator">💾 Speichere...</span>';
+            // Zeige Speicher-Status
+            document.getElementById('editFormArea').style.display = 'none';
+            document.getElementById('editSaving').style.display = 'block';
             
             try {
                 const rawValue = Math.round(parseFloat(newValue) * divisor);
@@ -946,38 +1889,30 @@ try {
                 const result = await response.json();
                 
                 if (result.success) {
-                    let displayValue = divisor > 1 ? parseFloat(newValue).toFixed(decimal).replace('.', ',') : newValue;
-                    displayValue += (unit ? ' ' + unit : '');
+                    // Schließe Modal
+                    closeEditDialog();
                     
-                    editableDiv.innerHTML = `
-                        <span class="value-display">${displayValue}</span>
-                        <button class="btn-edit" onclick="editValue(this)">✏️</button>
-                    `;
-                    
+                    // Zeige Erfolg in der Tabelle
                     valueCell.style.background = '#c8e6c9';
                     setTimeout(() => valueCell.style.background = '', 1000);
+                    
+                    // Aktualisiere Daten
                     setTimeout(fetchData, 500);
                 } else {
                     throw new Error(result.error || 'Unbekannter Fehler');
                 }
             } catch (error) {
                 alert('Fehler beim Speichern: ' + error.message);
-                const point = tableData.find(p => p.variableid == variableId);
-                if (point) {
-                    editableDiv.innerHTML = `
-                        <span class="value-display">${point.value}</span>
-                        <button class="btn-edit" onclick="editValue(this)">✏️</button>
-                    `;
-                }
+                // Zeige Form wieder an
+                document.getElementById('editFormArea').style.display = 'block';
+                document.getElementById('editSaving').style.display = 'none';
             }
         }
         
-        function cancelEdit(valueCell, originalValue) {
-            const editableDiv = valueCell.querySelector('.editable-value');
-            editableDiv.innerHTML = `
-                <span class="value-display">${originalValue}</span>
-                <button class="btn-edit" onclick="editValue(this)">✏️</button>
-            `;
+        function closeEditDialog() {
+            document.getElementById('editModal').classList.remove('show');
+            currentEditVariableId = null;
+            currentEditValueCell = null;
         }
         
         function showError(message) {
@@ -990,14 +1925,25 @@ try {
         
         function initRegisterTypeFilter() {
             const types = new Set();
-            tableData.forEach(point => point.modbusregistertype && types.add(point.modbusregistertype));
+            tableData.forEach(point => {
+                if (point.modbusregistertype) {
+                    types.add(point.modbusregistertype);
+                }
+            });
             const select = document.getElementById('filterRegisterType');
             const currentValue = select.value;
             select.innerHTML = '<option value="">Alle</option>';
             types.forEach(type => {
                 const option = document.createElement('option');
                 option.value = type;
-                option.textContent = type;
+                // Kurzform für Anzeige
+                if (type === 'MODBUS_INPUT_REGISTER') {
+                    option.textContent = 'I (Input Register)';
+                } else if (type === 'MODBUS_HOLDING_REGISTER') {
+                    option.textContent = 'H (Holding Register)';
+                } else {
+                    option.textContent = type;
+                }
                 if (type === currentValue) option.selected = true;
                 select.appendChild(option);
             });
@@ -1008,7 +1954,7 @@ try {
                 variableId: document.getElementById('filterVariableId').value.toLowerCase(),
                 modbusRegisterID: document.getElementById('filterModbusRegisterID').value.toLowerCase(),
                 title: document.getElementById('filterTitle').value.toLowerCase(),
-                registerType: document.getElementById('filterRegisterType').value.toLowerCase(),
+                registerType: document.getElementById('filterRegisterType').value, // Vollständiger Wert, kein toLowerCase
                 value: document.getElementById('filterValue').value.toLowerCase(),
                 selectedOnly: document.getElementById('filterSelectedOnly').checked,
                 hideValuesActive: document.getElementById('hideValuesActive').checked
@@ -1022,11 +1968,16 @@ try {
                 if (cells.length === 0) return;
                 
                 const checkbox = row.querySelector('.row-checkbox');
+                const variableId = row.dataset.variableid;
+                
+                // Finde den Datenpunkt für registerType Filter
+                const point = tableData.find(p => p.variableid == variableId);
+                
                 const matches = {
                     variableId: cells[1].textContent.toLowerCase().includes(filters.variableId),
                     modbusRegisterID: cells[2].textContent.toLowerCase().includes(filters.modbusRegisterID),
                     title: cells[3].textContent.toLowerCase().includes(filters.title),
-                    registerType: !filters.registerType || cells[4].textContent.toLowerCase().includes(filters.registerType),
+                    registerType: !filters.registerType || (point && point.modbusregistertype === filters.registerType),
                     value: cells[5].textContent.toLowerCase().includes(filters.value),
                     selected: !filters.selectedOnly || (checkbox && checkbox.checked),
                     hideValues: !filters.hideValuesActive || !hideValues.some(v => cells[5].textContent.toLowerCase().includes(v.toLowerCase()))
@@ -1082,6 +2033,9 @@ try {
         }
         
         window.addEventListener('DOMContentLoaded', () => {
+            console.log('USE_DB_ENABLED:', USE_DB_ENABLED);
+            console.log('API_UPDATE_INTERVAL:', apiUpdateInterval);
+            
             document.getElementById('filterVariableId').addEventListener('input', filterTable);
             document.getElementById('filterModbusRegisterID').addEventListener('input', filterTable);
             document.getElementById('filterTitle').addEventListener('input', filterTable);
@@ -1089,6 +2043,38 @@ try {
             document.getElementById('filterValue').addEventListener('input', filterTable);
             document.getElementById('filterSelectedOnly').addEventListener('change', filterTable);
             document.getElementById('hideValuesActive').addEventListener('change', filterTable);
+            
+            document.getElementById('historyModal').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeHistory();
+                }
+            });
+            
+            document.getElementById('importModal').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeImportDialog();
+                }
+            });
+            
+            document.getElementById('editModal').addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeEditDialog();
+                }
+            });
+            
+            // Enter-Taste im Edit Input
+            document.getElementById('editInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    saveEditValue();
+                }
+            });
+            
+            // Escape-Taste im Edit Input
+            document.getElementById('editInput').addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    closeEditDialog();
+                }
+            });
             
             initRegisterTypeFilter();
             updateCounts();
