@@ -28,6 +28,9 @@ In der config.php müssen 4 Parameter angepasst werden:
 * API_PASSWORD  wird in der Nibesteuerung festgelegt
 
 Wenn die Datenbank genutzt werden soll müssen noch die Anpassungen für die Maria oder Mysql Datenbank gemacht werden. 
+Die Datenbankstruktur findet ihr in der Datei init_db_nibeapi.sql
+
+Um die Übersichtlichkeit zu erhöhen liegen nun alle Dateien im Ordner nibeapi.
 
 ### Version 3 ist eine Datenbankfunktion dazu gekommen.
 In die Datenbank werden alle schreibaren Datenpunkte geschrieben. 
