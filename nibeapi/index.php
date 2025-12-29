@@ -19,7 +19,7 @@ require_once 'ajax-handlers.php';
 $error = null;
 $data = [];
 $dbSaveResult = null;
-$version = '3.2.01';
+$version = '3.2.02';
 
 try {
     $jsonData = fetchApiData(API_URL, API_KEY, API_USERNAME, API_PASSWORD);
