@@ -6,9 +6,11 @@
  * WICHTIG: Diese Datei sollte aus Sicherheitsgründen NICHT in öffentlich
  * zugänglichen Verzeichnissen liegen. Alternativ mit .htaccess schützen.
  */
-
+// IP Adresse der Nibe Steuerung
+define('API_IP', '192.168.1.44');
+define('API_PORT', '8443');
 // API Basis-URL
-define('API_URL', 'https://192.168.1.44:8443/api/v1/devices/0/points');
+define('API_URL', 'https://' . API_IP . ':' . API_PORT . '/api/v1/devices/0/points');
 
 // API Authentifizierung - Bearer Token (falls benötigt)
 define('API_KEY', '');
@@ -85,7 +87,7 @@ define('CACHE_ENABLED', false);
 define('CACHE_DURATION', 300); // in Sekunden (5 Minuten)
 
 // Weitere API Endpoints (falls benötigt)
-define('API_BASE_URL', 'https://192.168.1.44:8443/api/v1');
+define('API_BASE_URL', 'https://' . API_IP . ':' . API_PORT . '/api/v1');
 define('API_DEVICES_ENDPOINT', API_BASE_URL . '/devices');
 define('API_POINTS_ENDPOINT', API_BASE_URL . '/devices/0/points');
 
