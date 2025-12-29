@@ -22,8 +22,8 @@ Bei einem Neuen Server direkt in das root Verzeichnis des Webservers.
 
 In der config.php müssen 4 Parameter angepasst werden:
 
-* API_URL       hier sollte es reichen wenn die IP Adresse geändert wird.
-* API_BASE_URL  hier sollte es reichen wenn die IP Adresse geändert wird.
+* API_IP        IP Adresse der Nibe Steuerung.
+* API_PORT      Port der Nibe API in der Regel 8443.
 * API_USERNAME  wird in der Nibesteuerung festgelegt
 * API_PASSWORD  wird in der Nibesteuerung festgelegt
 
