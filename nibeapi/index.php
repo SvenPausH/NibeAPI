@@ -1,7 +1,6 @@
 <?php
 /**
- * API Daten Abruf mit Auto-Refresh - Version 3.3.00 (Modular)
- * Hauptdatei: index.php
+  * Hauptdatei: index.php
  */
 
 // UTF-8 Encoding sicherstellen
@@ -20,7 +19,7 @@ require_once 'ajax-handlers.php';
 $error = null;
 $data = [];
 $dbSaveResult = null;
-$version = '3.2.00';
+$version = '3.2.01';
 
 try {
     $jsonData = fetchApiData(API_URL, API_KEY, API_USERNAME, API_PASSWORD);
