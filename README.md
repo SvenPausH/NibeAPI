@@ -59,16 +59,16 @@ Die Api wird alle 10 Sekunden gelesen. Der Upate Interval ist in der config.php 
 - !Da es eine Änderung der Datenbankstruktur gegeben hat müssen hier diverse Tabellen unn Spalten eingerichtet werden.
    
 ### Übersicht Seite
-<img width="1427" height="779" alt="API Datenpunkte Uebersicht" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapiUebersicht.png" />
+<img width="1427" height="779" alt="API Datenpunkte Uebersicht" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeApiUebersicht.png" />
 
 ### Historie Seite
-<img width="1427" height="779" alt="API historie" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapiHistorie.png" />
+<img width="1427" height="779" alt="API historie" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeApiHistorie.png" />
 
 ### pflegen von Menüpunkten
-<img width="1427" height="779" alt="APIMenuepunkte" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapiMenuepunkte.png" />
+<img width="1427" height="779" alt="APIMenuepunkte" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeApiMenuepunkte.png" />
 
 ### Alarme
-<img width="1427" height="779" alt="APIAlarme" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapiAlarme.png" />
+<img width="1427" height="779" alt="APIAlarme" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeApiAlarme.png" />
 
 
 
