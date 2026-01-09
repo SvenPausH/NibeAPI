@@ -56,7 +56,7 @@ Die Api wird alle 10 Sekunden gelesen. Der Upate Interval ist in der config.php 
 - ✨ Neu Möglichkeit die Menüpunkte der einzelnen Datenpunkte in der Datenbank zu hinterlegen. Die Tabelle kann imortiert und weiter gepflegt werden. Wer sich hier mit beteiligen möchte ist herzlich eingeladen. Die Tabelle Tabellenibe_menuepunkte.sql werde ich immer mal erweitern. Evtl. kommt für einen besseren Austausch auch noch ein Im- / Export.
 - ✨ Script das als Cronjob eingebunden werden kann das Änderungen in der Steuerung erfasst und bei Alarmen per Email oder Telegram benachrichtigt.
 - 🐛 Diverse Bugfixes
-- !Da es eine Änderung der Datenbankstruktur gegeben hat müssen hier diverse Tabellen unn Spalten eingerichtet werden.
+- !Da es eine Änderung der Datenbankstruktur gegeben hat müssen hier diverse Tabellen unn Spalten eingerichtet werden. Schaut einmal in den UpgradeGiude3.4.txt
    
 ### Übersicht Seite
 <img width="1427" height="779" alt="API Datenpunkte Uebersicht" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeApiUebersicht.png" />
