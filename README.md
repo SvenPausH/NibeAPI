@@ -48,10 +48,27 @@ Die Api wird alle 10 Sekunden gelesen. Der Upate Interval ist in der config.php 
 - ✨ Dynamisches Update-Intervall
 - ✨ Persistente Sortierung
 - 🐛 Diverse Bugfixes
-- 
 
-<img width="1427" height="779" alt="API Datenpunkte History" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapi_v3_2_uebersicht.png" />
-<img width="1427" height="779" alt="API Datenpunkte" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapi_v3_2_history.png" />
+### Version 3.4.00
+- ✨ Komplette RestApi implementiert. Mehere Geräte werden nun berücksichtigt.
+- ✨ Historie Seite mit Filter und Sortiermöglichkeiten.
+- ✨ Alarme Seite mit Möglichkeit die Fehler zu löschen. (Die Funktion wurde wie in der Api vorgegeben implmentiert, funktioniert aber nicht. Bei Nibe habe ich deshalb ein Ticket eröffnet welches aber mit Verweis auf den Händler der sich um die Einstellungen kümmern soll verwiesen wurde. Leider nicht das erste mal das der Support das Ticket sofort schließt.)
+- ✨ Neu Möglichkeit die Menüpunkte der einzelnen Datenpunkte in der Datenbank zu hinterlegen. Die Tabelle kann imortiert und weiter gepflegt werden. Wer sich hier mit beteiligen möchte ist herzlich eingeladen.
+- ✨ Script das als Cronjob eingebunden werden kann das Änderungen in der Steuerung erfasst und bei Alarmen per Email oder Telegram benachrichtigt.
+- 🐛 Diverse Bugfixes
+- !Da es eine Änderung der Datenbankstruktur gegeben hat müssen hier diverse Tabellen unn Spalten eingerichtet werden.
+   
+### Übersicht Seite
+<img width="1427" height="779" alt="API Datenpunkte Uebersicht" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapiUebersicht.png" />
+
+### Historie Seite
+<img width="1427" height="779" alt="API historie" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapiHistorie.png" />
+
+### pflegen von Menüpunkten
+<img width="1427" height="779" alt="APIMenuepunkte" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapiMenuepunkte.png" />
+
+### Alarme
+<img width="1427" height="779" alt="APIAlarme" src="https://github.com/SvenPausH/NibeAPI/blob/main/nibeapiAlarme.png" />
 
 
 
