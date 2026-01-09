@@ -63,8 +63,12 @@ button { padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; 
 .btn-toggle.paused { background: #ff9800; }
 .btn-import { background: #9C27B0; color: white; }
 .btn-import:hover { background: #7B1FA2; }
+.btn-history { background: #00BCD4; color: white; }
+.btn-history:hover { background: #0097A7; }
 .btn-edit { padding: 4px 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.3s; }
 .btn-edit:hover { background: #1976D2; }
+.btn-menu { padding: 4px 8px; background: #FF9800; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.3s; }
+.btn-menu:hover { background: #F57C00; }
 
 /* Info Bar */
 .info-bar { 
@@ -130,6 +134,9 @@ tbody tr:nth-child(even):hover { background: #f0f0f0; }
 .value-cell { position: relative; }
 .editable-value { display: flex; align-items: center; gap: 8px; }
 .value-display { flex: 1; }
+.menuepunkt-cell { position: relative; }
+.menuepunkt-display { display: flex; align-items: center; gap: 8px; }
+.menuepunkt-value { flex: 1; color: #FF9800; font-weight: 500; }
 .checkbox-cell { text-align: center; width: 40px; }
 .row-checkbox { cursor: pointer; width: 18px; height: 18px; }
 .no-data { text-align: center; padding: 40px; color: #999; font-style: italic; }

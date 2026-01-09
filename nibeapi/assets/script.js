@@ -1,16 +1,19 @@
 /**
- * JavaScript für Nibe API Dashboard
- * assets/script.js
+ * JavaScript für Nibe API Dashboard - Version 3.4.00
+ * assets/script.js - KOMPLETT mit Device-Support
  */
 
+// ===================================
 // Globale Variablen
+// ===================================
 let tableData = [];
 let autoUpdateEnabled = true;
 let updateInterval = null;
 let hideValues = [];
 let currentApiUpdateInterval = 10000;
 let availableIntervals = {};
-let USE_DB_ENABLED = false;
+let USE_DB = false; // KORRIGIERT: USE_DB statt USE_DB_ENABLED
+let currentDeviceId = 0;
 
 // Sortierung
 let currentSortColumn = null;
@@ -21,6 +24,9 @@ let selectedFile = null;
 let currentEditVariableId = null;
 let currentEditValueCell = null;
 
+// Menüpunkt
+let currentMenuepunktVariableId = null;
+
 // ===================================
 // Initialisierung
 // ===================================
@@ -30,7 +36,14 @@ function initializeApp(data, config) {
     hideValues = config.hideValues;
     currentApiUpdateInterval = config.apiUpdateInterval;
     availableIntervals = config.availableIntervals;
-    USE_DB_ENABLED = config.useDb;
+    USE_DB = config.useDb; // KORRIGIERT
+    currentDeviceId = config.deviceId || 0;
+    
+    console.log('App initialisiert:', {
+        dataPoints: tableData.length,
+        useDb: USE_DB,
+        deviceId: currentDeviceId
+    });
     
     attachEventListeners();
     initRegisterTypeFilter();
@@ -45,6 +58,7 @@ function initializeApp(data, config) {
 function attachEventListeners() {
     document.getElementById('filterVariableId').addEventListener('input', filterTable);
     document.getElementById('filterModbusRegisterID').addEventListener('input', filterTable);
+    document.getElementById('filterMenuepunkt').addEventListener('input', filterTable);
     document.getElementById('filterTitle').addEventListener('input', filterTable);
     document.getElementById('filterRegisterType').addEventListener('change', filterTable);
     document.getElementById('filterValue').addEventListener('input', filterTable);
@@ -62,6 +76,10 @@ function attachEventListeners() {
     
     document.getElementById('editModal').addEventListener('click', function(e) {
         if (e.target === this) closeEditDialog();
+    });
+    
+    document.getElementById('menuepunktModal').addEventListener('click', function(e) {
+        if (e.target === this) closeMenuepunktDialog();
     });
     
     document.getElementById('editInput').addEventListener('keypress', function(e) {
@@ -180,6 +198,7 @@ function filterTable() {
     const filters = {
         variableId: document.getElementById('filterVariableId').value.toLowerCase(),
         modbusRegisterID: document.getElementById('filterModbusRegisterID').value.toLowerCase(),
+        menuepunkt: document.getElementById('filterMenuepunkt').value.toLowerCase(),
         title: document.getElementById('filterTitle').value.toLowerCase(),
         registerType: document.getElementById('filterRegisterType').value,
         value: document.getElementById('filterValue').value.toLowerCase(),
@@ -197,15 +216,17 @@ function filterTable() {
         const checkbox = row.querySelector('.row-checkbox');
         const variableId = row.dataset.variableid;
         const point = tableData.find(p => p.variableid == variableId);
+        const menuepunkt = row.dataset.menuepunkt || '';
         
         const matches = {
             variableId: cells[1].textContent.toLowerCase().includes(filters.variableId),
             modbusRegisterID: cells[2].textContent.toLowerCase().includes(filters.modbusRegisterID),
-            title: cells[3].textContent.toLowerCase().includes(filters.title),
+            menuepunkt: menuepunkt.toLowerCase().includes(filters.menuepunkt),
+            title: cells[4].textContent.toLowerCase().includes(filters.title),
             registerType: !filters.registerType || (point && point.modbusregistertype === filters.registerType),
-            value: cells[5].textContent.toLowerCase().includes(filters.value),
+            value: cells[6].textContent.toLowerCase().includes(filters.value),
             selected: !filters.selectedOnly || (checkbox && checkbox.checked),
-            hideValues: !filters.hideValuesActive || !hideValues.some(v => cells[5].textContent.toLowerCase().includes(v.toLowerCase()))
+            hideValues: !filters.hideValuesActive || !hideValues.some(v => cells[6].textContent.toLowerCase().includes(v.toLowerCase()))
         };
         
         if (Object.values(matches).every(m => m)) {
@@ -223,6 +244,7 @@ function filterTable() {
 function resetFilters() {
     document.getElementById('filterVariableId').value = '';
     document.getElementById('filterModbusRegisterID').value = '';
+    document.getElementById('filterMenuepunkt').value = '';
     document.getElementById('filterTitle').value = '';
     document.getElementById('filterRegisterType').value = '';
     document.getElementById('filterValue').value = '';
@@ -293,7 +315,7 @@ function changeUpdateInterval() {
 
 async function fetchData() {
     try {
-        const response = await fetch('?ajax=fetch');
+        const response = await fetch('?ajax=fetch&deviceId=' + currentDeviceId);
         const result = await response.json();
         if (result.success) {
             updateTable(result.data);
@@ -319,7 +341,7 @@ function updateTable(newData) {
     tbody.querySelectorAll('tr').forEach(row => {
         const id = row.dataset.variableid;
         const cb = row.querySelector('.row-checkbox');
-        if (id && row.cells[5]) oldValues[id] = row.cells[5].textContent.trim();
+        if (id && row.cells[6]) oldValues[id] = row.cells[6].textContent.trim();
         if (id && cb) oldChecked[id] = cb.checked;
     });
     
@@ -335,7 +357,8 @@ function updateTable(newData) {
             decimal: point.decimal,
             minvalue: point.minValue,
             maxvalue: point.maxValue,
-            description: point.description || ''
+            description: point.description || '',
+            menuepunkt: point.menuepunkt || ''
         }).forEach(([k, v]) => row.dataset[k] = v);
         
         row.onmouseenter = e => showTooltip(e, row);
@@ -352,10 +375,32 @@ function updateTable(newData) {
         
         row.insertCell(1).textContent = point.variableid;
         row.insertCell(2).textContent = point.modbusregisterid;
-        row.insertCell(3).textContent = point.title;
-        row.insertCell(4).textContent = point.modbusregistertype === 'MODBUS_INPUT_REGISTER' ? 'Input' : (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' ? 'Holding' : point.modbusregistertype);
         
-        const valueCell = row.insertCell(5);
+        // Menüpunkt-Zelle
+        const menuepunktCell = row.insertCell(3);
+        menuepunktCell.className = 'menuepunkt-cell';
+        if (USE_DB) { // KORRIGIERT
+            const div = document.createElement('div');
+            div.className = 'menuepunkt-display';
+            const span = document.createElement('span');
+            span.className = 'menuepunkt-value';
+            span.textContent = point.menuepunkt || '-';
+            const btn = document.createElement('button');
+            btn.className = 'btn-menu';
+            btn.textContent = '📝';
+            btn.title = 'Menüpunkt bearbeiten';
+            btn.onclick = () => editMenuepunkt(point.variableid, point.title, point.menuepunkt || '');
+            div.appendChild(span);
+            div.appendChild(btn);
+            menuepunktCell.appendChild(div);
+        } else {
+            menuepunktCell.textContent = '-';
+        }
+        
+        row.insertCell(4).textContent = point.title;
+        row.insertCell(5).textContent = point.modbusregistertype === 'MODBUS_INPUT_REGISTER' ? 'Input' : (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' ? 'Holding' : point.modbusregistertype);
+        
+        const valueCell = row.insertCell(6);
         valueCell.className = 'value-cell';
         
         if (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' && point.isWritable) {
@@ -379,7 +424,7 @@ function updateTable(newData) {
             valueCell.textContent = point.value;
         }
         
-        if (USE_DB_ENABLED) {
+        if (USE_DB) { // KORRIGIERT
             const historyCell = row.insertCell();
             historyCell.style.textAlign = 'center';
             
@@ -426,8 +471,6 @@ function clearError() {
     document.getElementById('errorContainer').innerHTML = '';
 }
 
-
-
 // ===================================
 // Tooltip
 // ===================================
@@ -465,12 +508,14 @@ function hideTooltip() {
     document.getElementById('rowTooltip').classList.remove('show');
 }
 
+// Fortsetzung in Teil 2...
+
 // ===================================
 // History Modal
 // ===================================
 
 async function showHistory(variableId, title) {
-    if (!USE_DB_ENABLED) {
+    if (!USE_DB) { // KORRIGIERT
         alert('Datenbank-Funktionen sind deaktiviert');
         return;
     }
@@ -553,7 +598,11 @@ async function restoreHistoryValue(variableId, rawValue) {
         const response = await fetch('?ajax=write', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({variableId: variableId, value: rawValue})
+            body: JSON.stringify({
+                variableId: variableId, 
+                value: rawValue,
+                deviceId: currentDeviceId
+            })
         });
         
         const result = await response.json();
@@ -695,7 +744,7 @@ function editValue(variableId, title) {
         return;
     }
     
-    const valueCell = row.cells[5];
+    const valueCell = row.cells[6];
     
     currentEditVariableId = variableId;
     currentEditValueCell = valueCell;
@@ -751,7 +800,11 @@ async function saveEditValue() {
         const response = await fetch('?ajax=write', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({variableId: variableId, value: rawValue})
+            body: JSON.stringify({
+                variableId: variableId, 
+                value: rawValue,
+                deviceId: currentDeviceId
+            })
         });
         
         const result = await response.json();
@@ -777,4 +830,69 @@ function closeEditDialog() {
     document.getElementById('editModal').classList.remove('show');
     currentEditVariableId = null;
     currentEditValueCell = null;
+}
+
+// ===================================
+// Menüpunkt Modal
+// ===================================
+
+function editMenuepunkt(variableId, title, currentMenuepunkt) {
+    if (!USE_DB) { // KORRIGIERT
+        alert('Datenbank-Funktionen sind deaktiviert');
+        return;
+    }
+    
+    currentMenuepunktVariableId = variableId;
+    
+    document.getElementById('menuepunktTitle').textContent = '📊 ' + title;
+    document.getElementById('menuepunktApiId').textContent = 'API ID: ' + variableId;
+    document.getElementById('menuepunktCurrentValue').textContent = currentMenuepunkt || '-';
+    document.getElementById('menuepunktInput').value = currentMenuepunkt || '';
+    
+    document.getElementById('menuepunktFormArea').style.display = 'block';
+    document.getElementById('menuepunktSaving').style.display = 'none';
+    document.getElementById('menuepunktModal').classList.add('show');
+    
+    setTimeout(() => {
+        const input = document.getElementById('menuepunktInput');
+        input.focus();
+        input.select();
+    }, 100);
+}
+
+async function saveMenuepunkt() {
+    const menuepunkt = document.getElementById('menuepunktInput').value.trim();
+    const variableId = currentMenuepunktVariableId;
+    
+    document.getElementById('menuepunktFormArea').style.display = 'none';
+    document.getElementById('menuepunktSaving').style.display = 'block';
+    
+    try {
+        const response = await fetch('?ajax=saveMenupunkt', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                apiId: variableId,
+                menuepunkt: menuepunkt
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            closeMenuepunktDialog();
+            setTimeout(fetchData, 500);
+        } else {
+            throw new Error(result.error || 'Unbekannter Fehler');
+        }
+    } catch (error) {
+        alert('Fehler beim Speichern: ' + error.message);
+        document.getElementById('menuepunktFormArea').style.display = 'block';
+        document.getElementById('menuepunktSaving').style.display = 'none';
+    }
+}
+
+function closeMenuepunktDialog() {
+    document.getElementById('menuepunktModal').classList.remove('show');
+    currentMenuepunktVariableId = null;
 }

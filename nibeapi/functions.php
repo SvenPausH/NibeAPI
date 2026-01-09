@@ -94,22 +94,141 @@ function fetchApiData($url, $apiKey = '', $username = '', $password = '') {
 }
 
 /**
- * API-Daten verarbeiten und in einheitliches Format konvertieren
+ * Alle Devices von der API abrufen
+ * Version 3.4.00 - Mit verbessertem Debugging
  */
-function processApiData($rawData) {
+function discoverDevices() {
+    try {
+        $url = API_DEVICES_ENDPOINT;
+        debugLog("Device-Discovery gestartet", ['url' => $url], 'DEVICES');
+        
+        $jsonData = fetchApiData($url, API_KEY, API_USERNAME, API_PASSWORD);
+        $data = json_decode($jsonData, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('JSON Dekodierungs-Fehler bei Device-Discovery: ' . json_last_error_msg());
+        }
+        
+        debugLog("Device-Discovery JSON Response", ['raw' => $data], 'DEVICES');
+        
+        if (!isset($data['devices'])) {
+            debugLog("Keine 'devices' Key in API-Antwort", ['keys' => array_keys($data)], 'WARNING');
+            throw new Exception('Keine Devices in API-Antwort gefunden. Verfügbare Keys: ' . implode(', ', array_keys($data)));
+        }
+        
+        if (!is_array($data['devices'])) {
+            throw new Exception('devices ist kein Array');
+        }
+        
+        debugLog("Devices entdeckt", ['anzahl' => count($data['devices'])], 'DEVICES');
+        
+        return $data['devices'];
+        
+    } catch (Exception $e) {
+        debugLog("Fehler bei Device-Discovery", ['error' => $e->getMessage()], 'ERROR');
+        throw $e;
+    }
+}
+/**
+ * Notifications für ein Device abrufen
+ */
+function fetchNotifications($deviceId) {
+    try {
+        $url = API_BASE_URL . '/api/' . API_VERSION . '/devices/' . $deviceId . '/notifications';
+        $jsonData = fetchApiData($url, API_KEY, API_USERNAME, API_PASSWORD);
+        $data = json_decode($jsonData, true);
+        
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new Exception('JSON Dekodierungs-Fehler bei Notifications');
+        }
+        
+        $alarms = $data['alarms'] ?? [];
+        
+        debugLog("Notifications abgerufen", ['deviceId' => $deviceId, 'anzahl' => count($alarms)], 'API');
+        
+        return $alarms;
+        
+    } catch (Exception $e) {
+        debugLog("Fehler beim Abrufen von Notifications", ['deviceId' => $deviceId, 'error' => $e->getMessage()], 'ERROR');
+        throw $e;
+    }
+}
+
+/**
+ * Notifications für ein Device zurücksetzen
+ */
+function resetNotifications($deviceId) {
+    try {
+        $url = API_BASE_URL . '/api/' . API_VERSION . '/devices/' . $deviceId . '/notifications';
+        
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        
+        $headers = [
+            'Accept: application/json',
+            'Content-Type: application/json'
+        ];
+        
+        if (!empty(API_USERNAME) && !empty(API_PASSWORD)) {
+            $basicAuth = base64_encode(API_USERNAME . ':' . API_PASSWORD);
+            $headers[] = 'Authorization: Basic ' . $basicAuth;
+        } elseif (!empty(API_KEY)) {
+            $headers[] = 'Authorization: Bearer ' . API_KEY;
+        }
+        
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        
+        if ($httpCode >= 200 && $httpCode < 300) {
+            debugLog("Notifications zurückgesetzt", ['deviceId' => $deviceId], 'API');
+            return true;
+        } else {
+            throw new Exception('HTTP Fehler: ' . $httpCode);
+        }
+        
+    } catch (Exception $e) {
+        debugLog("Fehler beim Zurücksetzen von Notifications", ['deviceId' => $deviceId, 'error' => $e->getMessage()], 'ERROR');
+        throw $e;
+    }
+}
+
+/**
+ * API-Daten verarbeiten und in einheitliches Format konvertieren
+ * Version 3.4.00 - MIT DEVICEID SUPPORT
+ */
+function processApiData($rawData, $deviceId = null) {
     $data = [];
+    
+    // Menüpunkte laden wenn DB aktiv
+    $menuepunkte = [];
+    if (USE_DB) {
+        try {
+            $menuepunkte = getAllMenupunkte();
+        } catch (Exception $e) {
+            debugLog("Fehler beim Laden der Menüpunkte", ['error' => $e->getMessage()], 'WARNING');
+        }
+    }
     
     foreach ($rawData as $id => $point) {
         $intValue = $point['value']['integerValue'] ?? 0;
         $divisor = $point['metadata']['divisor'] ?? 1;
         $decimal = $point['metadata']['decimal'] ?? 0;
         $unit = $point['metadata']['unit'] ?? '';
+        $apiId = $point['metadata']['variableId'] ?? $id;
         
         $calculatedValue = $divisor > 1 ? 
             number_format($intValue / $divisor, $decimal, ',', '.') : $intValue;
         
         $data[] = [
-            'variableid' => $point['metadata']['variableId'] ?? $id,
+            'deviceId' => $deviceId,  // NEU: Device ID hinzufügen
+            'variableid' => $apiId,
             'modbusregisterid' => $point['metadata']['modbusRegisterID'] ?? '-',
             'title' => $point['title'] ?? '-',
             'description' => $point['description'] ?? '',
@@ -123,7 +242,8 @@ function processApiData($rawData) {
             'variableType' => $point['metadata']['variableType'] ?? '-',
             'variableSize' => $point['metadata']['variableSize'] ?? '-',
             'minValue' => $point['metadata']['minValue'] ?? 0,
-            'maxValue' => $point['metadata']['maxValue'] ?? 0
+            'maxValue' => $point['metadata']['maxValue'] ?? 0,
+            'menuepunkt' => $menuepunkte[$apiId] ?? null
         ];
     }
     
