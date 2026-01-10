@@ -60,6 +60,10 @@ define('NOTIFY_TELEGRAM_CHAT_ID', 'YOUR_CHAT_ID'); // Deine Chat-ID
 define('NOTIFY_MIN_SEVERITY', 1); // 0=Info, 1=Warnung, 2=Alarm, 3=Kritisch
 define('NOTIFY_COOLDOWN_MINUTES', 5); // Gleiche Notification nicht öfter als alle X Minuten
 
+// Notifications Update-Intervall (in Sekunden, 0 = deaktiviert)
+define('NOTIFICATIONS_CHECK_INTERVAL', 300); // Alle 5 Minuten
+define('NOTIFICATIONS_CHECK_BY', 'CRON'); // 'CRON' oder 'WEB'
+
 // ============================================================================
 // AUTHENTIFIZIERUNG
 // ============================================================================
