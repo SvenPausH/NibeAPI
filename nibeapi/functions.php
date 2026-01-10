@@ -201,7 +201,7 @@ function resetNotifications($deviceId) {
 
 /**
  * API-Daten verarbeiten und in einheitliches Format konvertieren
- * Version 3.4.00 - MIT DEVICEID SUPPORT
+ * Version 3.4.01 - MIT METADATA SPEICHERUNG
  */
 function processApiData($rawData, $deviceId = null) {
     $data = [];
@@ -226,8 +226,8 @@ function processApiData($rawData, $deviceId = null) {
         $calculatedValue = $divisor > 1 ? 
             number_format($intValue / $divisor, $decimal, ',', '.') : $intValue;
         
-        $data[] = [
-            'deviceId' => $deviceId,  // NEU: Device ID hinzufügen
+        $dataPoint = [
+            'deviceId' => $deviceId,
             'variableid' => $apiId,
             'modbusregisterid' => $point['metadata']['modbusRegisterID'] ?? '-',
             'title' => $point['title'] ?? '-',
@@ -245,8 +245,67 @@ function processApiData($rawData, $deviceId = null) {
             'maxValue' => $point['metadata']['maxValue'] ?? 0,
             'menuepunkt' => $menuepunkte[$apiId] ?? null
         ];
+        
+        // NEU: Metadaten in DB speichern (falls Spalten existieren)
+        if (USE_DB) {
+            try {
+                saveDatapointMetadata($apiId, $divisor, $decimal, $unit);
+            } catch (Exception $e) {
+                // Fehler beim Speichern ignorieren (Spalten existieren evtl. noch nicht)
+                // debugLog würde zu viel Output erzeugen
+            }
+        }
+        
+        $data[] = $dataPoint;
     }
     
     return $data;
+}
+
+/**
+ * Hilfsfunktion: Speichert Divisor, Decimal und Unit in DB
+ * Wird von processApiData() automatisch aufgerufen
+ */
+function saveDatapointMetadata($apiId, $divisor, $decimal, $unit) {
+    static $columnsChecked = false;
+    static $columnsExist = false;
+    
+    // Einmalig prüfen ob Spalten existieren
+    if (!$columnsChecked) {
+        try {
+            $pdo = getDbConnection();
+            $stmt = $pdo->query("SHOW COLUMNS FROM nibe_datenpunkte LIKE 'divisor'");
+            $columnsExist = (bool)$stmt->fetch();
+            $columnsChecked = true;
+        } catch (Exception $e) {
+            $columnsChecked = true;
+            $columnsExist = false;
+            return false;
+        }
+    }
+    
+    // Wenn Spalten nicht existieren, abbrechen
+    if (!$columnsExist) {
+        return false;
+    }
+    
+    try {
+        $pdo = getDbConnection();
+        
+        // Nur aktualisieren wenn sich Werte geändert haben
+        $stmt = $pdo->prepare("
+            UPDATE nibe_datenpunkte 
+            SET divisor = ?, decimal_places = ?, unit = ?
+            WHERE api_id = ? 
+            AND (divisor != ? OR decimal_places != ? OR unit != ?)
+        ");
+        $stmt->execute([$divisor, $decimal, $unit, $apiId, $divisor, $decimal, $unit]);
+        
+        return $stmt->rowCount() > 0;
+        
+    } catch (Exception $e) {
+        // Fehler ignorieren
+        return false;
+    }
 }
 ?>

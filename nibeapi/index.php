@@ -20,7 +20,7 @@ require_once 'ajax-handlers.php';
 $error = null;
 $data = [];
 $dbSaveResult = null;
-$version = '3.4.00';
+$version = '3.4.10';
 $devices = [];
 $selectedDeviceId = 0; // Default-Wert
 
@@ -99,8 +99,69 @@ debugLog("Finale Device ID", ['deviceId' => $selectedDeviceId, 'type' => gettype
 $apiUrl = API_BASE_URL . '/api/' . API_VERSION . '/devices/' . $selectedDeviceId . '/points';
 
 debugLog("API-URL", ['url' => $apiUrl, 'deviceId' => $selectedDeviceId], 'INFO');
+// Update-Strategie prüfen
+$checkBy = defined('NOTIFICATIONS_CHECK_BY') ? NOTIFICATIONS_CHECK_BY : 'WEB';
+$checkInterval = defined('NOTIFICATIONS_CHECK_INTERVAL') ? NOTIFICATIONS_CHECK_INTERVAL : 300;
+$skipFullUpdate = false;
+$updateWarning = null;
+
+if ($checkBy === 'CRON') {
+    // CRON-Modus: Web macht KEINE Device-Discovery, KEINE Master-Updates, KEINE Notification-Checks
+    // ABER: Zeigt Live-Daten von API an!
+    debugLog("CRON-Modus aktiv - Device-Discovery/Master-Updates/Notifications überspringen", null, 'INFO');
+    
+    // Prüfen ob letztes Update zu lange her ist (Warnung)
+    if (USE_DB && !empty($devices)) {
+        try {
+            $pdo = getDbConnection();
+            
+            // Ältestes last_updated aller Devices finden
+            $stmt = $pdo->query("
+                SELECT MIN(last_updated) as oldest_update,
+                       TIMESTAMPDIFF(SECOND, MIN(last_updated), NOW()) as seconds_ago
+                FROM nibe_device
+                WHERE last_updated IS NOT NULL
+            ");
+            $result = $stmt->fetch();
+            
+            if ($result && $result['oldest_update']) {
+                $secondsAgo = $result['seconds_ago'];
+                $maxAge = $checkInterval * 2; // Doppelter Interval = Warnung
+                
+                if ($secondsAgo > $maxAge) {
+                    $minutesAgo = round($secondsAgo / 60);
+                    $expectedMinutes = round($checkInterval / 60);
+                    
+                    $updateWarning = [
+                        'message' => "⚠️ WARNUNG: Letzte Aktualisierung vor {$minutesAgo} Minuten (erwartet: alle {$expectedMinutes} Min.)",
+                        'details' => "Der Cronjob 'notification-monitor.php' läuft möglicherweise nicht!",
+                        'lastUpdate' => $result['oldest_update'],
+                        'secondsAgo' => $secondsAgo,
+                        'maxAge' => $maxAge
+                    ];
+                    
+                    debugLog("Update-Warnung", $updateWarning, 'WARNING');
+                }
+            }
+            
+        } catch (Exception $e) {
+            debugLog("Fehler beim Prüfen des Update-Status", ['error' => $e->getMessage()], 'ERROR');
+        }
+    }
+    
+    $skipFullUpdate = true;
+} else {
+    // WEB-Modus: Web macht alles (wie bisher)
+    debugLog("WEB-Modus aktiv - Web führt vollständige Updates durch", null, 'INFO');
+}
+
 
 try {
+    // API-Daten IMMER abrufen (in beiden Modi für Live-Anzeige)
+    $apiUrl = API_BASE_URL . '/api/' . API_VERSION . '/devices/' . $selectedDeviceId . '/points';
+    
+    debugLog("API-URL", ['url' => $apiUrl, 'deviceId' => $selectedDeviceId], 'INFO');
+    
     $jsonData = fetchApiData($apiUrl, API_KEY, API_USERNAME, API_PASSWORD);
     $rawData = json_decode($jsonData, true);
     
@@ -110,18 +171,54 @@ try {
     
     $data = processApiData($rawData, $selectedDeviceId);
     
-    if (USE_DB) {
+    // Datenbank-Operationen NUR im WEB-Modus
+    if (USE_DB && !$skipFullUpdate) {
+        // WEB-Modus: Volle DB-Updates
         try {
-            $dbSaveResult = saveAllDatapoints($data, $selectedDeviceId);
-            debugLog("Initiales Speichern in Master-Tabelle erfolgreich", $dbSaveResult, 'DB');
+            // Device-Discovery (neue Devices erkennen)
+            try {
+                $discoveredDevices = discoverDevices();
+                foreach ($discoveredDevices as $apiDevice) {
+                    saveDevice($apiDevice);
+                }
+                debugLog("Device-Discovery durchgeführt", ['anzahl' => count($discoveredDevices)], 'INFO');
+            } catch (Exception $e) {
+                debugLog("Device-Discovery fehlgeschlagen", ['error' => $e->getMessage()], 'WARNING');
+            }
             
+            // Master-Tabelle aktualisieren
+            $dbSaveResult = saveAllDatapoints($data, $selectedDeviceId);
+            debugLog("Master-Tabelle aktualisiert", $dbSaveResult, 'DB');
+            
+            // Wertänderungen loggen
             logValueChanges($data, $selectedDeviceId);
-            debugLog("Initiale Werte in Log-Tabelle geschrieben", null, 'DB_LOG');
+            debugLog("Wertänderungen geloggt", null, 'DB_LOG');
+            
+            // Notifications prüfen
+            try {
+                $alarms = fetchNotifications($selectedDeviceId);
+                foreach ($alarms as $alarm) {
+                    saveNotification($selectedDeviceId, $alarm);
+                }
+                debugLog("Notifications geprüft", ['anzahl' => count($alarms)], 'INFO');
+            } catch (Exception $e) {
+                debugLog("Notification-Check fehlgeschlagen", ['error' => $e->getMessage()], 'WARNING');
+            }
+            
+            // last_updated aktualisieren
+            $pdo = getDbConnection();
+            $stmt = $pdo->prepare("UPDATE nibe_device SET last_updated = NOW() WHERE deviceId = ?");
+            $stmt->execute([$selectedDeviceId]);
+            debugLog("last_updated gesetzt für Device {$selectedDeviceId}", null, 'DB');
             
         } catch (Exception $e) {
-            debugLog("Fehler beim initialen DB-Speichern", ['error' => $e->getMessage()], 'ERROR');
+            debugLog("Fehler bei DB-Operationen", ['error' => $e->getMessage()], 'ERROR');
         }
+    } elseif ($skipFullUpdate) {
+        // CRON-Modus: Keine DB-Updates, nur Live-Anzeige
+        debugLog("CRON-Modus: DB-Updates übersprungen, nur Live-Anzeige", null, 'INFO');
     } else {
+        // DB deaktiviert
         debugLog("Datenbank-Funktionen deaktiviert (USE_DB = false)", null, 'INFO');
     }
     
@@ -189,12 +286,85 @@ try {
             gap: 20px;
             flex-wrap: wrap;
         }
+        .update-warning {
+            background: #fff3cd;
+            border-left: 4px solid #ff9800;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .update-warning-icon {
+            font-size: 32px;
+            flex-shrink: 0;
+        }
+        
+        .update-warning-content {
+            flex: 1;
+        }
+        
+        .update-warning-title {
+            font-weight: 600;
+            color: #f57c00;
+            margin-bottom: 5px;
+        }
+        
+        .update-warning-details {
+            color: #666;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        
+        .update-warning-actions {
+            margin-top: 10px;
+        }
+        
+        .btn-warning {
+            background: #ff9800;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn-warning:hover {
+            background: #f57c00;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1><span class="live-indicator" id="liveIndicator"></span>📊 Nibe API Datenpunkte Übersicht <?php echo $version?></h1>
-        
+        <?php if ($updateWarning): ?>
+        <div class="update-warning">
+            <div class="update-warning-icon">⚠️</div>
+            <div class="update-warning-content">
+                <div class="update-warning-title"><?php echo htmlspecialchars($updateWarning['message']); ?></div>
+                <div class="update-warning-details">
+                    <?php echo htmlspecialchars($updateWarning['details']); ?><br>
+                    Letztes Update: <strong><?php echo htmlspecialchars($updateWarning['lastUpdate']); ?></strong>
+                    (vor <?php echo round($updateWarning['secondsAgo'] / 60); ?> Minuten)
+                </div>
+                <div class="update-warning-actions">
+                    <a href="https://<?php echo $_SERVER['HTTP_HOST']; ?>/path/to/notification-monitor.php" 
+                       class="btn-warning" target="_blank">
+                        📋 Cronjob-Dokumentation
+                    </a>
+                    <button class="btn-warning" onclick="checkCronjobStatus()">
+                        🔄 Status prüfen
+                    </button>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+ 
         <?php if (USE_DB && !empty($devices)): ?>
         <div class="device-selector">
             <label for="deviceSelect">🔧 Device:</label>
@@ -243,7 +413,7 @@ try {
                     <label for="filterSelectedOnly">Nur ausgewählte anzeigen</label>
                 </div>
                 <div class="toggle-option">
-                    <input type="checkbox" id="showTooltips" checked>
+                    <input type="checkbox" id="showTooltips" >
                     <label for="showTooltips">Zusatzinformationen bei Hover anzeigen</label>
                 </div>
                 <div class="toggle-option">
@@ -577,6 +747,16 @@ try {
             
             initializeApp(initialData, config);
         });
+        function checkCronjobStatus() {
+            alert('Cronjob-Status prüfen:\n\n' +
+                  '1. SSH zum Server verbinden\n' +
+                  '2. Cronjob-Liste prüfen: crontab -l\n' +
+                  '3. Log-Datei prüfen: <?php echo DEBUG_LOG_FULLPATH; ?>\n' +
+                  '4. Manuell testen: php <?php echo __DIR__; ?>/notification-monitor.php --debug\n\n' +
+                  'Erwarteter Cronjob:\n' +
+                  '* * * * * /usr/bin/php <?php echo __DIR__; ?>/notification-monitor.php');
+        }
+
     </script>
 </body>
 </html>

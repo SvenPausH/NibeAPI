@@ -18,7 +18,7 @@ if (!USE_DB) {
     die('Datenbank-Funktionen sind deaktiviert. Bitte aktivieren Sie USE_DB in der config.php');
 }
 
-$version = '3.3.00';
+$version = '3.4.10';
 
 // Pagination Parameter
 $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
@@ -39,8 +39,10 @@ $filterZeitVonFull = $filterZeitVon ? $filterZeitVon . ' 00:00:00' : '';
 $filterZeitBisFull = $filterZeitBis ? $filterZeitBis . ' 23:59:59' : '';
 
 // Sortierung Parameter
-$sortBy = $_GET['sortBy'] ?? 'api_id,zeitstempel';
-$sortDir = $_GET['sortDir'] ?? 'asc,desc';
+//$sortBy = $_GET['sortBy'] ?? 'api_id,zeitstempel';
+//$sortDir = $_GET['sortDir'] ?? 'asc,desc';
+$sortBy = $_GET['sortBy'] ?? 'zeitstempel';
+$sortDir = $_GET['sortDir'] ?? 'desc';
 
 // Daten abrufen
 $historyData = [];

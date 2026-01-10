@@ -30,6 +30,7 @@ function getDbConnection() {
     }
 }
 
+
 /**
  * Device in Datenbank speichern/aktualisieren
  * KORRIGIERT für API v3.4.00 - Struktur angepasst
@@ -687,4 +688,157 @@ function importLogData($fileContent, $fileName) {
         throw new Exception('Import-Fehler: ' . $e->getMessage());
     }
 }
+/**
+ * Lädt die letzten bekannten Datenpunkte aus der Datenbank
+ * Wird im CRON-Modus verwendet um Daten anzuzeigen ohne API-Call
+ * 
+ * @param int $deviceId Device ID
+ * @return array Array mit Datenpunkten im gleichen Format wie processApiData()
+ */
+function getLastDatapointsFromDB($deviceId = null) {
+    try {
+        $pdo = getDbConnection();
+        
+        // Menüpunkte laden
+        $menuepunkte = getAllMenupunkte();
+        
+        // SQL Query: Hole alle Datenpunkte mit ihrem letzten Log-Wert
+        $sql = "
+            SELECT 
+                dp.api_id,
+                dp.modbus_id,
+                dp.title,
+                dp.modbus_register_type,
+                
+                -- Letzter Wert aus Log (falls vorhanden)
+                (
+                    SELECT wert 
+                    FROM nibe_datenpunkte_log 
+                    WHERE nibe_datenpunkte_id = dp.id 
+                    AND deviceId = ?
+                    ORDER BY zeitstempel DESC 
+                    LIMIT 1
+                ) as last_rawvalue,
+                
+                -- Zeitstempel des letzten Werts
+                (
+                    SELECT zeitstempel 
+                    FROM nibe_datenpunkte_log 
+                    WHERE nibe_datenpunkte_id = dp.id 
+                    AND deviceId = ?
+                    ORDER BY zeitstempel DESC 
+                    LIMIT 1
+                ) as last_update
+                
+            FROM nibe_datenpunkte dp
+            ORDER BY dp.api_id ASC
+        ";
+        
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$deviceId, $deviceId]);
+        $rows = $stmt->fetchAll();
+        
+        debugLog("Datenpunkte aus DB geladen", [
+            'deviceId' => $deviceId,
+            'count' => count($rows)
+        ], 'DB');
+        
+        // In gleiches Format wie processApiData() konvertieren
+        $data = [];
+        
+        foreach ($rows as $row) {
+            // Wenn kein Wert in Log vorhanden, überspringen
+            // (kann vorkommen bei neu erkannten Datenpunkten)
+            if ($row['last_rawvalue'] === null) {
+                continue;
+            }
+            
+            $apiId = $row['api_id'];
+            $rawValue = (int)$row['last_rawvalue'];
+            $registerType = $row['modbus_register_type'];
+            
+            // Standard-Werte für Divisor, Decimal, Unit
+            // Diese Info haben wir leider nicht in der DB gespeichert
+            // Daher nehmen wir Standardwerte
+            $divisor = 1;
+            $decimal = 0;
+            $unit = '';
+            
+            // Bekannte Datenpunkte mit speziellen Divisoren
+            // Diese Liste kann erweitert werden basierend auf bekannten IDs
+            $knownPoints = [
+                // Temperaturen (meist Divisor 10)
+                40004 => ['divisor' => 10, 'decimal' => 1, 'unit' => '°C'], // BT1 Außentemperatur
+                40033 => ['divisor' => 10, 'decimal' => 1, 'unit' => '°C'], // BT50 Raumtemperatur
+                40008 => ['divisor' => 10, 'decimal' => 1, 'unit' => '°C'], // BT2 Vorlauftemperatur
+                40012 => ['divisor' => 10, 'decimal' => 1, 'unit' => '°C'], // BT3 Rücklauftemperatur
+                40013 => ['divisor' => 10, 'decimal' => 1, 'unit' => '°C'], // BT7 Heißgas
+                40014 => ['divisor' => 10, 'decimal' => 1, 'unit' => '°C'], // BT10 Kältemittel
+                40015 => ['divisor' => 10, 'decimal' => 1, 'unit' => '°C'], // BT11 Kältemittel
+                40019 => ['divisor' => 10, 'decimal' => 1, 'unit' => '°C'], // BT25 Kondensator
+                
+                // Drücke (Divisor 100)
+                40025 => ['divisor' => 100, 'decimal' => 2, 'unit' => 'bar'], // Druck
+                
+                // Prozente (Divisor 10)
+                43424 => ['divisor' => 10, 'decimal' => 1, 'unit' => '%'], // Kompressor %
+                43427 => ['divisor' => 10, 'decimal' => 1, 'unit' => '%'], // Pumpe %
+                
+                // Leistungen (meist Divisor 100)
+                40072 => ['divisor' => 100, 'decimal' => 2, 'unit' => 'kW'], // Leistung
+                
+                // Weitere können hier ergänzt werden...
+            ];
+            
+            if (isset($knownPoints[$apiId])) {
+                $divisor = $knownPoints[$apiId]['divisor'];
+                $decimal = $knownPoints[$apiId]['decimal'];
+                $unit = $knownPoints[$apiId]['unit'];
+            }
+            
+            // Wert berechnen
+            $calculatedValue = $divisor > 1 ? 
+                number_format($rawValue / $divisor, $decimal, ',', '.') : $rawValue;
+            
+            // isWritable bestimmen (Holding Register = beschreibbar)
+            $isWritable = ($registerType === 'MODBUS_HOLDING_REGISTER');
+            
+            // Datenpunkt-Array erstellen (kompatibel mit processApiData Format)
+            $data[] = [
+                'deviceId' => $deviceId,
+                'variableid' => $apiId,
+                'modbusregisterid' => $row['modbus_id'],
+                'title' => $row['title'],
+                'description' => '', // Nicht in DB gespeichert
+                'modbusregistertype' => $registerType,
+                'value' => $calculatedValue . ($unit ? ' ' . $unit : ''),
+                'rawvalue' => $rawValue,
+                'unit' => $unit,
+                'divisor' => $divisor,
+                'decimal' => $decimal,
+                'isWritable' => $isWritable,
+                'variableType' => '-', // Nicht in DB gespeichert
+                'variableSize' => '-', // Nicht in DB gespeichert
+                'minValue' => 0, // Nicht in DB gespeichert
+                'maxValue' => 0, // Nicht in DB gespeichert
+                'menuepunkt' => $menuepunkte[$apiId] ?? null,
+                'fromDB' => true, // Marker dass Daten aus DB kommen
+                'lastUpdate' => $row['last_update'] // Zeitstempel des Werts
+            ];
+        }
+        
+        debugLog("Datenpunkte konvertiert", [
+            'total' => count($rows),
+            'withValues' => count($data)
+        ], 'DB');
+        
+        return $data;
+        
+    } catch (PDOException $e) {
+        debugLog("Fehler beim Laden der Datenpunkte aus DB", ['error' => $e->getMessage()], 'ERROR');
+        throw new Exception('Datenbankfehler: ' . $e->getMessage());
+    }
+}
+
+
 ?>
