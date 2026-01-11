@@ -11,3 +11,18 @@ INSERT INTO `nibe_system_config` (`config_key`, `value`)
 VALUES ('update_lock', '0')
 ON DUPLICATE KEY UPDATE `value` = '0';
 
+
+-- Bestehende Tabellen erweitern
+ALTER TABLE nibe_datenpunkte 
+  ADD COLUMN deviceId INT(10) DEFAULT NULL AFTER id,
+  ADD KEY idx_device (deviceId),
+  ADD CONSTRAINT fk_datenpunkt_device FOREIGN KEY (deviceId) 
+    REFERENCES nibe_device(deviceId) ON DELETE SET NULL;
+
+ALTER TABLE nibe_datenpunkte_log 
+  ADD COLUMN deviceId INT(10) DEFAULT NULL AFTER id,
+  ADD KEY idx_device (deviceId),
+  ADD CONSTRAINT fk_log_device FOREIGN KEY (deviceId) 
+    REFERENCES nibe_device(deviceId) ON DELETE SET NULL;
+
+
