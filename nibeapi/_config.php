@@ -34,7 +34,7 @@ define('NOTIFICATIONS_CHECK_INTERVAL', 300); // Alle 5 Minuten
 // NOTIFICATION MONITOR KONFIGURATION
 // ============================================================================
 
-/ E-Mail Benachrichtigungen
+// E-Mail Benachrichtigungen
 define('NOTIFY_EMAIL_ENABLED', true);
 define('NOTIFY_EMAIL_METHOD', 'smtp'); // 'smtp' oder 'mail' (PHP mail())
 
