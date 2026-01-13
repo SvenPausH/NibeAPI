@@ -1,6 +1,6 @@
 <?php
 /**
- * API Daten Abruf mit Auto-Refresh - Version 3.4.00 (Multi-Device Support)
+ * API Daten Abruf mit Auto-Refresh 
  * Hauptdatei: index.php
  */
 
@@ -20,7 +20,7 @@ require_once 'ajax-handlers.php';
 $error = null;
 $data = [];
 $dbSaveResult = null;
-$version = '3.4.10';
+$version = '3.4.20';
 $devices = [];
 $selectedDeviceId = 0; // Default-Wert
 
@@ -337,6 +337,13 @@ try {
         .btn-warning:hover {
             background: #f57c00;
         }
+	.filter-help {
+	     cursor: help;
+	     color: #2196F3;
+	     font-size: 14px;
+	     margin-left: 5px;
+        }
+
     </style>
 </head>
 <body>
@@ -432,8 +439,15 @@ try {
                     <input type="text" id="filterModbusRegisterID" placeholder="Filter nach Modbus ID...">
                 </div>
                 <div class="filter-group">
-                    <label for="filterMenuepunkt">Menüpunkt</label>
-                    <input type="text" id="filterMenuepunkt" placeholder="Filter nach Menüpunkt...">
+                    <label for="filterMenuepunkt">Menüpunkt
+		         <span class="filter-help" title="Tipps:
+	'1.' = Beginnt mit 1.
+	'1.2' = Enthält 1.2
+	'^1.2$' = Exakt 1.2
+	'^1\.' = Regex: Beginnt mit 1.">ℹ️
+			</span>
+		    </label>
+                    <input type="text" id="filterMenuepunkt" placeholder="z.B. 1. oder ^1\.2">
                 </div>
                 <div class="filter-group">
                     <label for="filterTitle">Title</label>

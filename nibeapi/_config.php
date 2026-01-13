@@ -34,7 +34,7 @@ define('NOTIFICATIONS_CHECK_INTERVAL', 300); // Alle 5 Minuten
 // NOTIFICATION MONITOR KONFIGURATION
 // ============================================================================
 
-// E-Mail Benachrichtigungen
+/ E-Mail Benachrichtigungen
 define('NOTIFY_EMAIL_ENABLED', true);
 define('NOTIFY_EMAIL_METHOD', 'smtp'); // 'smtp' oder 'mail' (PHP mail())
 
@@ -129,6 +129,62 @@ define('API_UPDATE_INTERVALS', [
 ]);
 
 // ============================================================================
+// INFLUXDB KONFIGURATION
+// ============================================================================
+
+// InfluxDB aktivieren/deaktivieren
+define('INFLUX_ENABLED', false); // true = aktiviert, false = deaktiviert
+
+// InfluxDB Version und Verbindungsdaten
+define('INFLUX_VERSION', 1); // 1 = InfluxDB 1.x, 2 = InfluxDB 2.x
+
+define('INFLUX_URL', 'http://192.168.1.100:8086'); // InfluxDB URL
+
+// === InfluxDB 2.x Konfiguration ===
+define('INFLUX_TOKEN', 'your-influxdb-token'); // API Token
+define('INFLUX_ORG', 'your-organization'); // Organisation
+
+define('INFLUX_BUCKET', 'nibe'); // Bucket Name (v2.x) / Database Name (v1.x)
+
+// === InfluxDB 1.x Konfiguration (nur wenn INFLUX_VERSION = 1) ===
+define('INFLUX_USERNAME', ''); // Username (leer lassen wenn keine Auth)
+define('INFLUX_PASSWORD', ''); // Password (leer lassen wenn keine Auth)
+// Hinweis: Bei v1.x wird INFLUX_BUCKET als Database-Name verwendet
+
+// InfluxDB Datenpunkt-Filter
+// Welche Datenpunkte sollen in InfluxDB geschrieben werden?
+
+// HOLDING REGISTER (beschreibbare Werte)
+// Optionen:
+// - 'all' = Alle Holding Register
+// - [123, 456, 789] = Nur diese Modbus IDs
+// - ['100-200', 300, '400-500'] = Bereiche und einzelne IDs gemischt
+define('INFLUX_HOLDING', 'all'); 
+
+// INPUT REGISTER (nur lesbare Werte)
+// Optionen wie oben
+define('INFLUX_INPUT', 'all');
+
+// Beispiele:
+// define('INFLUX_HOLDING', [47011, 47012, 47013]); // Nur diese IDs
+// define('INFLUX_INPUT', ['100-200', '300-400']); // Bereiche
+// define('INFLUX_HOLDING', ['100-200', 250, 300, '400-500']); // Gemischt
+
+// InfluxDB Werte-Filter (Value-basiert)
+// Datenpunkte mit diesen Werten werden NICHT in InfluxDB geschrieben
+// Beispiel: Sensoren die nicht aktiv sind zeigen oft ungültige Werte wie -3276.8
+define('INFLUX_HIDE_VALUES', [
+    '-3.276',
+    '-320000'
+]);
+// Hinweis: Es wird der BERECHNETE Wert geprüft (nach Divisor), nicht der Raw-Value
+
+
+// InfluxDB Optionen
+define('INFLUX_BATCH_SIZE', 100); // Wie viele Datenpunkte gleichzeitig senden
+define('INFLUX_TIMEOUT', 10); // Timeout für InfluxDB Requests in Sekunden
+
+// ============================================================================
 // API EINSTELLUNGEN
 // ============================================================================
 
@@ -155,6 +211,12 @@ define('DEBUG_LOG_FULLPATH', DEBUG_LOG_PATH . DEBUG_LOG_FILE); // Vollständiger
 
 // Maximale Debug-Log Dateigröße in Bytes (10 MB)
 define('DEBUG_LOG_MAX_SIZE', 10 * 1024 * 1024);
+
+// InfluxDB Debug - Schreibt alle Line Protocol Daten in Textdatei
+define('INFLUX_DEBUG_FILE', true); // true = aktiviert, false = deaktiviert
+define('INFLUX_DEBUG_PATH', DEBUG_LOG_PATH . 'influx_debug.txt');
+define('INFLUX_DEBUG_MAX_SIZE', 10 * 1024 * 1024); // Max. 10 MB
+
 
 // ============================================================================
 // CACHE EINSTELLUNGEN

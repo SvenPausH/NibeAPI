@@ -1,13 +1,12 @@
 <?php
 /**
- * Nibe Notification Monitor - Cronjob Script
- * notification-monitor.php
+ * Nibe Notification Monitor - Cronjob Script mit InfluxDB Support
+ * notification-monitor.php v2.0
  * 
- * Prüft alle konfigurierten Devices auf neue Notifications und 
- * versendet Benachrichtigungen per E-Mail und/oder Telegram
+ * NEU: Schreibt Datenpunkte in InfluxDB
  * 
  * Verwendung:
- * 1. Konfiguration in config.php anpassen (siehe unten)
+ * 1. Konfiguration in config.php anpassen
  * 2. Cronjob einrichten: * * * * * /usr/bin/php /pfad/zu/notification-monitor.php
  * 3. Oder manuell testen: php notification-monitor.php
  * 
@@ -15,15 +14,17 @@
  * - php notification-monitor.php --debug              Verbose Output + normale Ausführung
  * - php notification-monitor.php --test-email         Sendet Test-E-Mail
  * - php notification-monitor.php --test-telegram      Sendet Test-Telegram
- * - php notification-monitor.php --test-all           Testet E-Mail UND Telegram
+ * - php notification-monitor.php --test-influx        Testet InfluxDB Verbindung
+ * - php notification-monitor.php --test-all           Testet E-Mail, Telegram UND InfluxDB
  * - php notification-monitor.php --dry-run            Alles prüfen, nichts senden
  */
 
 // Kommandozeilen-Argumente parsen
-$options = getopt('', ['debug', 'test-email', 'test-telegram', 'test-all', 'dry-run']);
-$debugMode = isset($options['debug']) || isset($options['test-email']) || isset($options['test-telegram']) || isset($options['test-all']);
+$options = getopt('', ['debug', 'test-email', 'test-telegram', 'test-influx', 'test-all', 'dry-run']);
+$debugMode = isset($options['debug']) || isset($options['test-email']) || isset($options['test-telegram']) || isset($options['test-influx']) || isset($options['test-all']);
 $testEmailMode = isset($options['test-email']) || isset($options['test-all']);
 $testTelegramMode = isset($options['test-telegram']) || isset($options['test-all']);
+$testInfluxMode = isset($options['test-influx']) || isset($options['test-all']);
 $dryRunMode = isset($options['dry-run']);
 
 // Console Output Helper
@@ -40,7 +41,8 @@ function consoleLog($message, $data = null, $type = 'INFO') {
         'WARNING' => "\033[0;33m", // Yellow
         'ERROR' => "\033[0;31m",   // Red
         'DEBUG' => "\033[0;35m",   // Magenta
-        'MONITOR' => "\033[0;34m"  // Blue
+        'MONITOR' => "\033[0;34m", // Blue
+        'INFLUX' => "\033[0;96m"   // Bright Cyan
     ];
     
     $reset = "\033[0m";
@@ -60,44 +62,9 @@ function consoleLog($message, $data = null, $type = 'INFO') {
 require_once __DIR__ . '/config.php';
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/database.php';
+require_once __DIR__ . '/influxdb.php'; // NEU!
 
 consoleLog("=== Nibe Notification Monitor gestartet ===", null, 'INFO');
-
-// ============================================================================
-// KONFIGURATION - In config.php einfügen:
-// ============================================================================
-/*
-// ============================================================================
-// NOTIFICATION MONITOR KONFIGURATION
-// ============================================================================
-
-// E-Mail Benachrichtigungen
-define('NOTIFY_EMAIL_ENABLED', true);
-define('NOTIFY_EMAIL_METHOD', 'smtp'); // 'smtp' oder 'mail' (PHP mail())
-
-// SMTP Einstellungen (nur wenn NOTIFY_EMAIL_METHOD = 'smtp')
-define('NOTIFY_SMTP_HOST', 'smtp.example.com'); // z.B. smtp.gmail.com, smtp.ionos.de
-define('NOTIFY_SMTP_PORT', 587); // 587 (TLS), 465 (SSL), 25 (unsicher)
-define('NOTIFY_SMTP_SECURITY', 'tls'); // 'tls', 'ssl' oder '' (keine)
-define('NOTIFY_SMTP_AUTH', true); // true wenn Authentifizierung erforderlich
-define('NOTIFY_SMTP_USERNAME', 'your-email@example.com');
-define('NOTIFY_SMTP_PASSWORD', 'your-password');
-
-// E-Mail Absender/Empfänger
-define('NOTIFY_EMAIL_FROM', 'nibe@example.com');
-define('NOTIFY_EMAIL_FROM_NAME', 'Nibe Notification Monitor');
-define('NOTIFY_EMAIL_TO', 'admin@example.com'); // Mehrere: 'mail1@ex.com,mail2@ex.com'
-define('NOTIFY_EMAIL_SUBJECT', '[Nibe] Neue Notification');
-
-// Telegram Benachrichtigungen
-define('NOTIFY_TELEGRAM_ENABLED', false);
-define('NOTIFY_TELEGRAM_BOT_TOKEN', 'YOUR_BOT_TOKEN'); // Von @BotFather
-define('NOTIFY_TELEGRAM_CHAT_ID', 'YOUR_CHAT_ID'); // Deine Chat-ID
-
-// Monitor Einstellungen
-define('NOTIFY_MIN_SEVERITY', 1); // 0=Info, 1=Warnung, 2=Alarm, 3=Kritisch
-define('NOTIFY_COOLDOWN_MINUTES', 5); // Gleiche Notification nicht öfter als alle X Minuten
-*/
 
 // Prüfen ob DB aktiv ist
 if (!USE_DB) {
@@ -110,13 +77,19 @@ if (!USE_DB) {
 if ($testEmailMode) {
     consoleLog("=== E-MAIL TEST-MODUS ===", null, 'INFO');
     testEmail();
-    exit(0);
+    if (!isset($options['test-all'])) exit(0);
 }
 
 if ($testTelegramMode) {
     consoleLog("=== TELEGRAM TEST-MODUS ===", null, 'INFO');
     testTelegram();
-    exit(0);
+    if (!isset($options['test-all'])) exit(0);
+}
+
+if ($testInfluxMode) {
+    consoleLog("=== INFLUXDB TEST-MODUS ===", null, 'INFO');
+    testInfluxDB();
+    if (!isset($options['test-all'])) exit(0);
 }
 
 if ($dryRunMode) {
@@ -136,10 +109,12 @@ if (!defined('NOTIFY_EMAIL_ENABLED') && !defined('NOTIFY_TELEGRAM_ENABLED')) {
 
 $emailEnabled = defined('NOTIFY_EMAIL_ENABLED') && NOTIFY_EMAIL_ENABLED === true;
 $telegramEnabled = defined('NOTIFY_TELEGRAM_ENABLED') && NOTIFY_TELEGRAM_ENABLED === true;
+$influxEnabled = defined('INFLUX_ENABLED') && INFLUX_ENABLED === true;
 
 consoleLog("Konfiguration:", [
     'E-Mail' => $emailEnabled ? 'AKTIV' : 'INAKTIV',
     'Telegram' => $telegramEnabled ? 'AKTIV' : 'INAKTIV',
+    'InfluxDB' => $influxEnabled ? 'AKTIV' : 'INAKTIV',
     'Min Severity' => defined('NOTIFY_MIN_SEVERITY') ? NOTIFY_MIN_SEVERITY : 1,
     'Cooldown' => (defined('NOTIFY_COOLDOWN_MINUTES') ? NOTIFY_COOLDOWN_MINUTES : 5) . ' Minuten'
 ], 'INFO');
@@ -156,35 +131,145 @@ if (!$emailEnabled && !$telegramEnabled) {
 
 try {
     debugLog("Notification Monitor gestartet", null, 'MONITOR');
-    consoleLog("Starte Notification-Prüfung...", null, 'MONITOR');
+    consoleLog("Starte Monitor-Durchlauf...", null, 'MONITOR');
     
-    // Alle Devices abrufen
+    // Prüfen ob CRON-Modus aktiv ist
+    $checkBy = defined('NOTIFICATIONS_CHECK_BY') ? NOTIFICATIONS_CHECK_BY : 'WEB';
+    
+    if ($checkBy !== 'CRON') {
+        consoleLog("ABBRUCH: Monitor ist auf '{$checkBy}' konfiguriert, nicht auf 'CRON'", null, 'WARNING');
+        consoleLog("Bitte setzen Sie in config.php: define('NOTIFICATIONS_CHECK_BY', 'CRON');", null, 'INFO');
+        exit(0);
+    }
+    
+    // Prüfen ob bereits ein Update läuft (Lock-Check)
+    if (!acquireUpdateLock()) {
+        consoleLog("ABBRUCH: Ein anderer Update-Prozess läuft bereits", null, 'WARNING');
+        debugLog("Update-Lock aktiv - überspringe Durchlauf", null, 'MONITOR');
+        exit(0);
+    }
+    
+    consoleLog("Update-Lock erfolgreich gesetzt", null, 'SUCCESS');
+    
+    // SCHRITT 1: Device-Discovery (neue Devices erkennen)
+    consoleLog("\n[1/5] Device-Discovery...", null, 'INFO');
+    try {
+        $discoveredDevices = discoverDevices();
+        consoleLog("  └─ {count} Device(s) von API gefunden", ['count' => count($discoveredDevices)], 'DEBUG');
+        
+        $newDeviceCount = 0;
+        foreach ($discoveredDevices as $apiDevice) {
+            try {
+                // Prüfen ob Device schon existiert
+                $pdo = getDbConnection();
+                $stmt = $pdo->prepare("SELECT deviceId FROM nibe_device WHERE deviceId = ?");
+                $stmt->execute([$apiDevice['deviceIndex']]);
+                $exists = $stmt->fetch();
+                
+                saveDevice($apiDevice);
+                
+                if (!$exists) {
+                    $newDeviceCount++;
+                    consoleLog("  └─ NEUES Device gespeichert: {$apiDevice['product']['name']} (ID: {$apiDevice['deviceIndex']})", null, 'SUCCESS');
+                } else {
+                    consoleLog("  └─ Device aktualisiert: {$apiDevice['product']['name']} (ID: {$apiDevice['deviceIndex']})", null, 'DEBUG');
+                }
+            } catch (Exception $e) {
+                consoleLog("  └─ Fehler beim Speichern: " . $e->getMessage(), null, 'ERROR');
+            }
+        }
+        
+        if ($newDeviceCount > 0) {
+            consoleLog("  ✓ {$newDeviceCount} neue Device(s) gefunden und gespeichert", null, 'SUCCESS');
+        } else {
+            consoleLog("  ✓ Keine neuen Devices", null, 'INFO');
+        }
+        
+    } catch (Exception $e) {
+        consoleLog("  ✗ Device-Discovery fehlgeschlagen: " . $e->getMessage(), null, 'ERROR');
+    }
+    
+    // Alle Devices aus DB laden
     $devices = getAllDevices();
     
     if (empty($devices)) {
-        consoleLog("Keine Devices gefunden - beende Monitor", null, 'WARNING');
+        consoleLog("\n✗ Keine Devices in Datenbank - beende Monitor", null, 'WARNING');
         debugLog("Keine Devices gefunden - beende Monitor", null, 'WARNING');
         exit(0);
     }
     
-    consoleLog("Gefundene Devices: " . count($devices), null, 'INFO');
-    debugLog("Prüfe " . count($devices) . " Device(s)", null, 'MONITOR');
+    consoleLog("\n[2/5] Datenpunkte aktualisieren...", null, 'INFO');
+    consoleLog("  └─ Verarbeite {count} Device(s)", ['count' => count($devices)], 'INFO');
+    
+    $totalNewDatapoints = 0;
+    $totalUpdatedDatapoints = 0;
+    
+    // SCHRITT 2: Datenpunkte aktualisieren für jedes Device
+    foreach ($devices as $device) {
+        $deviceId = $device['deviceId'];
+        
+        consoleLog("  └─ Device {$deviceId}: {$device['name']}", null, 'DEBUG');
+        
+        try {
+            // API-Daten abrufen
+            $apiUrl = API_BASE_URL . '/api/' . API_VERSION . '/devices/' . $deviceId . '/points';
+            $jsonData = fetchApiData($apiUrl, API_KEY, API_USERNAME, API_PASSWORD);
+            $rawData = json_decode($jsonData, true);
+            
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new Exception('JSON Dekodierungs-Fehler');
+            }
+            
+            $data = processApiData($rawData, $deviceId);
+            consoleLog("     └─ {count} Datenpunkte von API", ['count' => count($data)], 'DEBUG');
+            
+            // Datenpunkte in Master-Tabelle speichern/aktualisieren
+            $saveResult = saveAllDatapoints($data, $deviceId);
+            $totalNewDatapoints += $saveResult['inserted'];
+            $totalUpdatedDatapoints += $saveResult['updated'];
+            
+            if ($saveResult['inserted'] > 0) {
+                consoleLog("     └─ {$saveResult['inserted']} neue Datenpunkte", null, 'SUCCESS');
+            }
+            if ($saveResult['updated'] > 0) {
+                consoleLog("     └─ {$saveResult['updated']} aktualisierte Datenpunkte", null, 'DEBUG');
+            }
+            
+            // Wertänderungen in Log schreiben
+            $loggedChanges = logValueChanges($data, $deviceId);
+            if ($loggedChanges > 0) {
+                consoleLog("     └─ {$loggedChanges} Wertänderungen geloggt", null, 'DEBUG');
+            }
+            
+        } catch (Exception $e) {
+            consoleLog("     └─ Fehler: " . $e->getMessage(), null, 'ERROR');
+            debugLog("Fehler beim Aktualisieren von Device $deviceId", ['error' => $e->getMessage()], 'ERROR');
+        }
+    }
+    
+    if ($totalNewDatapoints > 0 || $totalUpdatedDatapoints > 0) {
+        consoleLog("  ✓ Datenpunkte: {$totalNewDatapoints} neu, {$totalUpdatedDatapoints} aktualisiert", null, 'SUCCESS');
+    } else {
+        consoleLog("  ✓ Keine neuen Datenpunkte", null, 'INFO');
+    }
+    
+    consoleLog("\n[3/5] Notifications prüfen...", null, 'INFO');
+    debugLog("Prüfe " . count($devices) . " Device(s) auf Notifications", null, 'MONITOR');
     
     $totalNewNotifications = 0;
     $notificationsToSend = [];
     
-    // Jedes Device prüfen
+    // SCHRITT 3: Notifications prüfen für jedes Device
     foreach ($devices as $device) {
         $deviceId = $device['deviceId'];
         
-        consoleLog("Prüfe Device {$deviceId}: {$device['name']}", null, 'INFO');
-        debugLog("Prüfe Device $deviceId", ['name' => $device['name']], 'MONITOR');
+        consoleLog("  └─ Device {$deviceId}: {$device['name']}", null, 'DEBUG');
         
         try {
             // Notifications von API abrufen
             $alarms = fetchNotifications($deviceId);
             
-            consoleLog("  └─ {count} Notification(s) von API empfangen", ['count' => count($alarms)], 'DEBUG');
+            consoleLog("     └─ {count} Notification(s) von API", ['count' => count($alarms)], 'DEBUG');
             debugLog("Device $deviceId: " . count($alarms) . " Notification(s) von API", null, 'MONITOR');
             
             // Jede Notification prüfen und ggf. speichern
@@ -192,12 +277,12 @@ try {
                 $severity = $alarm['severity'] ?? 0;
                 $severityText = getSeverityText($severity);
                 
-                consoleLog("  └─ Alarm {$alarm['alarmId']}: {$severityText} - {$alarm['header']}", null, 'DEBUG');
+                consoleLog("     └─ Alarm {$alarm['alarmId']}: {$severityText} - {$alarm['header']}", null, 'DEBUG');
                 
                 // Mindest-Severity prüfen
                 $minSeverity = defined('NOTIFY_MIN_SEVERITY') ? NOTIFY_MIN_SEVERITY : 1;
                 if ($severity < $minSeverity) {
-                    consoleLog("     └─ Übersprungen (Severity zu niedrig: $severity < $minSeverity)", null, 'DEBUG');
+                    consoleLog("        └─ Übersprungen (Severity zu niedrig: $severity < $minSeverity)", null, 'DEBUG');
                     continue;
                 }
                 
@@ -206,7 +291,7 @@ try {
                 
                 if ($isNew) {
                     $totalNewNotifications++;
-                    consoleLog("     └─ NEU in Datenbank gespeichert", null, 'SUCCESS');
+                    consoleLog("        └─ NEU in Datenbank gespeichert", null, 'SUCCESS');
                     
                     // Cooldown prüfen (verhindert Spam bei gleichen Notifications)
                     if (shouldNotify($deviceId, $alarm)) {
@@ -214,57 +299,252 @@ try {
                             'device' => $device,
                             'alarm' => $alarm
                         ];
-                        consoleLog("     └─ Wird gesendet (Cooldown OK)", null, 'SUCCESS');
+                        consoleLog("        └─ Wird gesendet (Cooldown OK)", null, 'SUCCESS');
                     } else {
-                        consoleLog("     └─ NICHT gesendet (Cooldown aktiv)", null, 'WARNING');
+                        consoleLog("        └─ NICHT gesendet (Cooldown aktiv)", null, 'WARNING');
                     }
                 } else {
-                    consoleLog("     └─ Bereits in Datenbank vorhanden", null, 'DEBUG');
+                    consoleLog("        └─ Bereits vorhanden", null, 'DEBUG');
                 }
             }
             
         } catch (Exception $e) {
-            consoleLog("Fehler beim Prüfen von Device $deviceId: " . $e->getMessage(), null, 'ERROR');
+            consoleLog("     └─ Fehler: " . $e->getMessage(), null, 'ERROR');
             debugLog("Fehler beim Prüfen von Device $deviceId", ['error' => $e->getMessage()], 'ERROR');
         }
     }
     
+    if ($totalNewNotifications > 0) {
+        consoleLog("  ✓ {$totalNewNotifications} neue Notification(s) gefunden", null, 'SUCCESS');
+    } else {
+        consoleLog("  ✓ Keine neuen Notifications", null, 'INFO');
+    }
+    
+    // ============================================================================
+    // SCHRITT 4: INFLUXDB EXPORT (NEU!)
+    // ============================================================================
+    
+    consoleLog("\n[4/5] InfluxDB Export...", null, 'INFO');
+    
+    if ($influxEnabled) {
+        $totalInfluxSuccess = 0;
+        $totalInfluxFailed = 0;
+        $totalInfluxSkipped = 0;
+        
+        foreach ($devices as $device) {
+            $deviceId = $device['deviceId'];
+            
+            consoleLog("  └─ Device {$deviceId}: {$device['name']}", null, 'DEBUG');
+            
+            try {
+                // API-Daten abrufen (falls noch nicht vorhanden)
+                $apiUrl = API_BASE_URL . '/api/' . API_VERSION . '/devices/' . $deviceId . '/points';
+                $jsonData = fetchApiData($apiUrl, API_KEY, API_USERNAME, API_PASSWORD);
+                $rawData = json_decode($jsonData, true);
+                
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    throw new Exception('JSON Dekodierungs-Fehler');
+                }
+                
+                $data = processApiData($rawData, $deviceId);
+                
+                // In InfluxDB schreiben
+                if (!$dryRunMode) {
+                    $result = writeToInfluxDB($data, $deviceId);
+                    
+                    $totalInfluxSuccess += $result['success'];
+                    $totalInfluxFailed += $result['failed'];
+                    $totalInfluxSkipped += $result['skipped'];
+                    
+                    if ($result['success'] > 0) {
+                        consoleLog("     └─ {$result['success']} Datenpunkte geschrieben", null, 'SUCCESS');
+                    }
+                    if ($result['failed'] > 0) {
+                        consoleLog("     └─ {$result['failed']} Fehler", null, 'ERROR');
+                    }
+                    if ($result['skipped'] > 0) {
+                        consoleLog("     └─ {$result['skipped']} übersprungen (Filter)", null, 'DEBUG');
+                    }
+                } else {
+                    consoleLog("     └─ DRY-RUN: Würde Datenpunkte schreiben", null, 'WARNING');
+                }
+                
+            } catch (Exception $e) {
+                consoleLog("     └─ Fehler: " . $e->getMessage(), null, 'ERROR');
+                debugLog("InfluxDB Export Fehler für Device $deviceId", ['error' => $e->getMessage()], 'ERROR');
+            }
+        }
+        
+        consoleLog("  ✓ InfluxDB Export: {$totalInfluxSuccess} erfolgreich, {$totalInfluxFailed} fehlgeschlagen, {$totalInfluxSkipped} übersprungen", null, 'SUCCESS');
+        
+    } else {
+        consoleLog("  ⊘ InfluxDB ist deaktiviert", null, 'INFO');
+    }
+    
+    // ============================================================================
+    // ZUSAMMENFASSUNG
+    // ============================================================================
+    
     consoleLog("\n=== ZUSAMMENFASSUNG ===", null, 'INFO');
-    consoleLog("Geprüfte Devices: " . count($devices), null, 'INFO');
-    consoleLog("Neue Notifications: " . $totalNewNotifications, null, 'INFO');
+    consoleLog("Devices: " . count($devices), null, 'INFO');
+    consoleLog("Neue Datenpunkte: {$totalNewDatapoints}", null, 'INFO');
+    consoleLog("Aktualisierte Datenpunkte: {$totalUpdatedDatapoints}", null, 'INFO');
+    consoleLog("Neue Notifications: {$totalNewNotifications}", null, 'INFO');
     consoleLog("Zu versendende Benachrichtigungen: " . count($notificationsToSend), null, 'INFO');
+    
+    if ($influxEnabled) {
+        consoleLog("InfluxDB: {$totalInfluxSuccess} geschrieben, {$totalInfluxFailed} fehlgeschlagen", null, 'INFO');
+    }
     
     debugLog("Monitor-Durchlauf abgeschlossen", [
         'devices' => count($devices),
+        'newDatapoints' => $totalNewDatapoints,
+        'updatedDatapoints' => $totalUpdatedDatapoints,
         'newNotifications' => $totalNewNotifications,
-        'toSend' => count($notificationsToSend)
+        'toSend' => count($notificationsToSend),
+        'influxSuccess' => $totalInfluxSuccess ?? 0,
+        'influxFailed' => $totalInfluxFailed ?? 0
     ], 'MONITOR');
+    
+    // SCHRITT 5: Benachrichtigungen versenden
+    consoleLog("\n[5/5] Benachrichtigungen versenden...", null, 'INFO');
     
     // Benachrichtigungen versenden
     if (!empty($notificationsToSend)) {
         if ($dryRunMode) {
-            consoleLog("\nDRY-RUN: " . count($notificationsToSend) . " Benachrichtigung(en) würden gesendet", null, 'WARNING');
+            consoleLog("  DRY-RUN: " . count($notificationsToSend) . " Benachrichtigung(en) würden gesendet", null, 'WARNING');
             foreach ($notificationsToSend as $item) {
-                consoleLog("  - Device {$item['device']['deviceId']}: {$item['alarm']['header']}", null, 'INFO');
+                consoleLog("    - Device {$item['device']['deviceId']}: {$item['alarm']['header']}", null, 'INFO');
             }
         } else {
-            consoleLog("\nVersende Benachrichtigungen...", null, 'INFO');
             sendNotifications($notificationsToSend);
         }
     } else {
-        consoleLog("\nKeine neuen Notifications zum Versenden", null, 'INFO');
+        consoleLog("  ✓ Keine Benachrichtigungen zu versenden", null, 'INFO');
         debugLog("Keine neuen Notifications zum Versenden", null, 'MONITOR');
     }
     
     consoleLog("\n=== Monitor erfolgreich beendet ===", null, 'SUCCESS');
     
+    // last_updated für alle Devices aktualisieren
+    consoleLog("\nAktualisiere last_updated Timestamp...", null, 'INFO');
+    try {
+        $pdo = getDbConnection();
+        $stmt = $pdo->prepare("UPDATE nibe_device SET last_updated = NOW()");
+        $stmt->execute();
+        $affectedRows = $stmt->rowCount();
+        consoleLog("  ✓ {$affectedRows} Device(s) aktualisiert", null, 'SUCCESS');
+        debugLog("last_updated für {$affectedRows} Device(s) gesetzt", null, 'MONITOR');
+    } catch (Exception $e) {
+        consoleLog("  ✗ Fehler beim Aktualisieren: " . $e->getMessage(), null, 'ERROR');
+        debugLog("Fehler beim Setzen von last_updated", ['error' => $e->getMessage()], 'ERROR');
+    }
+    
+    // Update-Lock freigeben
+    releaseUpdateLock();
+    consoleLog("Update-Lock freigegeben", null, 'SUCCESS');
+    
 } catch (Exception $e) {
     consoleLog("KRITISCHER FEHLER: " . $e->getMessage(), null, 'ERROR');
     debugLog("Monitor Fehler", ['error' => $e->getMessage()], 'ERROR');
+    
+    // Lock freigeben auch bei Fehler
+    releaseUpdateLock();
+    
     exit(1);
 }
 
 exit(0);
+
+// ============================================================================
+// LOCK-MECHANISMUS (verhindert gleichzeitige Updates)
+// ============================================================================
+
+/**
+ * Versucht Update-Lock zu setzen
+ * Gibt true zurück wenn erfolgreich, false wenn bereits ein Update läuft
+ */
+function acquireUpdateLock() {
+    try {
+        $pdo = getDbConnection();
+        
+        // Prüfen ob bereits ein Lock existiert
+        $checkInterval = defined('NOTIFICATIONS_CHECK_INTERVAL') ? NOTIFICATIONS_CHECK_INTERVAL : 300;
+        
+        // Lock ist gültig wenn er nicht älter als CHECK_INTERVAL * 2 ist
+        $maxLockAge = $checkInterval * 2;
+        
+        $stmt = $pdo->prepare("
+            SELECT value, updated_at, 
+                   TIMESTAMPDIFF(SECOND, updated_at, NOW()) as age_seconds
+            FROM nibe_system_config 
+            WHERE config_key = 'update_lock'
+        ");
+        $stmt->execute();
+        $lock = $stmt->fetch();
+        
+        if ($lock) {
+            // Lock existiert - prüfen ob er noch gültig ist
+            if ($lock['value'] === '1' && $lock['age_seconds'] < $maxLockAge) {
+                debugLog("Update-Lock aktiv", [
+                    'age_seconds' => $lock['age_seconds'],
+                    'max_age' => $maxLockAge
+                ], 'MONITOR');
+                return false; // Lock ist aktiv
+            }
+            
+            // Alter Lock - überschreiben
+            if ($lock['age_seconds'] >= $maxLockAge) {
+                debugLog("Alter Lock überschrieben", ['age_seconds' => $lock['age_seconds']], 'WARNING');
+            }
+            
+            // Lock aktualisieren
+            $stmt = $pdo->prepare("
+                UPDATE nibe_system_config 
+                SET value = '1', updated_at = NOW()
+                WHERE config_key = 'update_lock'
+            ");
+            $stmt->execute();
+        } else {
+            // Lock erstellen
+            $stmt = $pdo->prepare("
+                INSERT INTO nibe_system_config (config_key, value, updated_at)
+                VALUES ('update_lock', '1', NOW())
+            ");
+            $stmt->execute();
+        }
+        
+        debugLog("Update-Lock gesetzt", null, 'MONITOR');
+        return true;
+        
+    } catch (Exception $e) {
+        debugLog("Fehler beim Setzen des Update-Locks", ['error' => $e->getMessage()], 'ERROR');
+        return false;
+    }
+}
+
+/**
+ * Gibt Update-Lock frei
+ */
+function releaseUpdateLock() {
+    try {
+        $pdo = getDbConnection();
+        
+        $stmt = $pdo->prepare("
+            UPDATE nibe_system_config 
+            SET value = '0', updated_at = NOW()
+            WHERE config_key = 'update_lock'
+        ");
+        $stmt->execute();
+        
+        debugLog("Update-Lock freigegeben", null, 'MONITOR');
+        return true;
+        
+    } catch (Exception $e) {
+        debugLog("Fehler beim Freigeben des Update-Locks", ['error' => $e->getMessage()], 'ERROR');
+        return false;
+    }
+}
 
 // ============================================================================
 // TEST-FUNKTIONEN
@@ -417,8 +697,74 @@ function testTelegram() {
     return $success;
 }
 
+function testInfluxDB() {
+    consoleLog("Teste InfluxDB Verbindung...", null, 'INFO');
+    
+    if (!defined('INFLUX_ENABLED') || INFLUX_ENABLED !== true) {
+        consoleLog("InfluxDB ist NICHT aktiviert", null, 'ERROR');
+        echo "\nBitte setzen Sie in config.php:\n";
+        echo "  define('INFLUX_ENABLED', true);\n\n";
+        return false;
+    }
+    
+    consoleLog("InfluxDB ist aktiviert", null, 'SUCCESS');
+    
+    $version = defined('INFLUX_VERSION') ? INFLUX_VERSION : 2;
+    
+    // Konfiguration prüfen
+    $config = [
+        'INFLUX_VERSION' => $version . '.x',
+        'INFLUX_URL' => defined('INFLUX_URL') ? INFLUX_URL : 'nicht gesetzt',
+    ];
+    
+    if ($version === 1) {
+        // InfluxDB 1.x
+        $config['INFLUX_BUCKET (Database)'] = defined('INFLUX_BUCKET') ? INFLUX_BUCKET : 'nicht gesetzt';
+        $config['INFLUX_USERNAME'] = defined('INFLUX_USERNAME') && !empty(INFLUX_USERNAME) ? INFLUX_USERNAME : 'nicht gesetzt (keine Auth)';
+        $config['INFLUX_PASSWORD'] = defined('INFLUX_PASSWORD') && !empty(INFLUX_PASSWORD) ? '***gesetzt***' : 'nicht gesetzt (keine Auth)';
+    } else {
+        // InfluxDB 2.x
+        $config['INFLUX_TOKEN'] = defined('INFLUX_TOKEN') ? (strlen(INFLUX_TOKEN) > 20 ? 'gesetzt (' . strlen(INFLUX_TOKEN) . ' Zeichen)' : 'zu kurz') : 'nicht gesetzt';
+        $config['INFLUX_ORG'] = defined('INFLUX_ORG') ? INFLUX_ORG : 'nicht gesetzt';
+        $config['INFLUX_BUCKET'] = defined('INFLUX_BUCKET') ? INFLUX_BUCKET : 'nicht gesetzt';
+    }
+    
+    $config['INFLUX_HOLDING'] = defined('INFLUX_HOLDING') ? INFLUX_HOLDING : 'nicht gesetzt';
+    $config['INFLUX_INPUT'] = defined('INFLUX_INPUT') ? INFLUX_INPUT : 'nicht gesetzt';
+    $config['INFLUX_HIDE_VALUES'] = defined('INFLUX_HIDE_VALUES') ? INFLUX_HIDE_VALUES : 'nicht gesetzt';
+    $config['INFLUX_DEBUG_FILE'] = defined('INFLUX_DEBUG_FILE') && INFLUX_DEBUG_FILE ? 'AKTIV' : 'INAKTIV';
+    
+    if (defined('INFLUX_DEBUG_FILE') && INFLUX_DEBUG_FILE === true) {
+        $config['INFLUX_DEBUG_PATH'] = defined('INFLUX_DEBUG_PATH') ? INFLUX_DEBUG_PATH : 'nicht gesetzt';
+    }
+    
+    consoleLog("Konfiguration:", $config, 'INFO');
+    
+    consoleLog("\nTeste Verbindung...", null, 'INFO');
+    
+    $result = testInfluxDBConnection();
+    
+    if ($result['success']) {
+        consoleLog("\n✓ InfluxDB Verbindung erfolgreich!", null, 'SUCCESS');
+        consoleLog("Details:", $result['details'], 'INFO');
+        
+        // Wenn Debug aktiv, Info anzeigen
+        if (defined('INFLUX_DEBUG_FILE') && INFLUX_DEBUG_FILE === true) {
+            consoleLog("\nℹ️  InfluxDB Debug ist AKTIV", null, 'INFO');
+            consoleLog("Debug-Datei: " . INFLUX_DEBUG_PATH, null, 'INFO');
+            consoleLog("Alle Line Protocol Daten werden in diese Datei geschrieben.", null, 'INFO');
+        }
+    } else {
+        consoleLog("\n✗ InfluxDB Verbindung fehlgeschlagen", null, 'ERROR');
+        consoleLog("Fehler: " . $result['message'], null, 'ERROR');
+        consoleLog("Details:", $result['details'], 'ERROR');
+    }
+    
+    return $result['success'];
+}
+
 // ============================================================================
-// HILFSFUNKTIONEN
+// HILFSFUNKTIONEN 
 // ============================================================================
 
 /**
@@ -969,3 +1315,4 @@ function getSeverityEmoji($severity) {
     ];
     return $emojis[$severity] ?? '❓';
 }
+?>
