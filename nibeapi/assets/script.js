@@ -1,6 +1,8 @@
 /**
- * JavaScript für Nibe API Dashboard - Version 3.4.00
- * assets/script.js - KOMPLETT mit Device-Support
+ * JavaScript für Nibe API Dashboard - Version 3.4.01
+ * assets/script.js - MEMORY OPTIMIERT
+ * 
+ * WICHTIG: Diese Datei gehört nach assets/script.js (NICHT in config.php!)
  */
 
 // ===================================
@@ -12,7 +14,7 @@ let updateInterval = null;
 let hideValues = [];
 let currentApiUpdateInterval = 10000;
 let availableIntervals = {};
-let USE_DB = false; // KORRIGIERT: USE_DB statt USE_DB_ENABLED
+let USE_DB = false;
 let currentDeviceId = 0;
 
 // Sortierung
@@ -27,6 +29,10 @@ let currentEditValueCell = null;
 // Menüpunkt
 let currentMenuepunktVariableId = null;
 
+// Memory Management
+let eventListeners = new WeakMap(); // Speichert Event Listener Referenzen
+let rowCache = new Map(); // Cache für existierende Rows
+
 // ===================================
 // Initialisierung
 // ===================================
@@ -36,7 +42,7 @@ function initializeApp(data, config) {
     hideValues = config.hideValues;
     currentApiUpdateInterval = config.apiUpdateInterval;
     availableIntervals = config.availableIntervals;
-    USE_DB = config.useDb; // KORRIGIERT
+    USE_DB = config.useDb;
     currentDeviceId = config.deviceId || 0;
     
     console.log('App initialisiert:', {
@@ -56,6 +62,81 @@ function initializeApp(data, config) {
 }
 
 function attachEventListeners() {
+    // Event Delegation für bessere Performance
+    const tbody = document.getElementById('tableBody');
+    
+    // WICHTIG: Event Delegation statt individuelle Listener pro Row
+    // Entfernt alte Listener falls vorhanden
+    const oldHandler = eventListeners.get(tbody);
+    if (oldHandler) {
+        tbody.removeEventListener('click', oldHandler.click);
+        tbody.removeEventListener('mouseenter', oldHandler.mouseenter, true);
+        tbody.removeEventListener('mouseleave', oldHandler.mouseleave, true);
+        tbody.removeEventListener('change', oldHandler.change);
+    }
+    
+    // Neue Handler Funktionen
+    const handlers = {
+        click: (e) => {
+            const target = e.target;
+            
+            // Edit Button
+            if (target.classList.contains('btn-edit')) {
+                const row = target.closest('tr');
+                if (row) {
+                    const variableId = row.dataset.variableid;
+                    const titleCell = row.cells[4];
+                    if (target.textContent.includes('📜')) {
+                        showHistory(variableId, titleCell ? titleCell.textContent : '');
+                    } else {
+                        editValue(variableId, titleCell ? titleCell.textContent : '');
+                    }
+                }
+            }
+            
+            // Menu Button
+            if (target.classList.contains('btn-menu')) {
+                const row = target.closest('tr');
+                if (row) {
+                    const variableId = row.dataset.variableid;
+                    const titleCell = row.cells[4];
+                    const menuepunkt = row.dataset.menuepunkt || '';
+                    editMenuepunkt(variableId, titleCell ? titleCell.textContent : '', menuepunkt);
+                }
+            }
+        },
+        
+        mouseenter: (e) => {
+            const row = e.target.closest('tr');
+            if (row && row.dataset.variableid) {
+                showTooltip(e, row);
+            }
+        },
+        
+        mouseleave: (e) => {
+            const row = e.target.closest('tr');
+            if (row && row.dataset.variableid) {
+                hideTooltip();
+            }
+        },
+        
+        change: (e) => {
+            if (e.target.classList.contains('row-checkbox')) {
+                updateSelectAllState();
+            }
+        }
+    };
+    
+    // Event Delegation attachieren
+    tbody.addEventListener('click', handlers.click);
+    tbody.addEventListener('mouseenter', handlers.mouseenter, true);
+    tbody.addEventListener('mouseleave', handlers.mouseleave, true);
+    tbody.addEventListener('change', handlers.change);
+    
+    // Handlers speichern für späteres Cleanup
+    eventListeners.set(tbody, handlers);
+    
+    // Filter Events
     document.getElementById('filterVariableId').addEventListener('input', filterTable);
     document.getElementById('filterModbusRegisterID').addEventListener('input', filterTable);
     document.getElementById('filterMenuepunkt').addEventListener('input', filterTable);
@@ -66,6 +147,7 @@ function attachEventListeners() {
     document.getElementById('hideValuesActive').addEventListener('change', filterTable);
     document.getElementById('updateInterval').addEventListener('change', changeUpdateInterval);
     
+    // Modal Events
     document.getElementById('historyModal').addEventListener('click', function(e) {
         if (e.target === this) closeHistory();
     });
@@ -90,7 +172,38 @@ function attachEventListeners() {
         if (e.key === 'Escape') closeEditDialog();
     });
     
-    window.addEventListener('beforeunload', stopAutoUpdate);
+    // Cleanup bei Page Unload
+    window.addEventListener('beforeunload', cleanup);
+}
+
+// ===================================
+// Memory Management & Cleanup
+// ===================================
+
+function cleanup() {
+    console.log('Cleanup: Räume Speicher auf...');
+    
+    // Auto-Update stoppen
+    stopAutoUpdate();
+    
+    // Event Listeners entfernen
+    const tbody = document.getElementById('tableBody');
+    const handlers = eventListeners.get(tbody);
+    if (handlers) {
+        tbody.removeEventListener('click', handlers.click);
+        tbody.removeEventListener('mouseenter', handlers.mouseenter, true);
+        tbody.removeEventListener('mouseleave', handlers.mouseleave, true);
+        tbody.removeEventListener('change', handlers.change);
+    }
+    
+    // Caches leeren
+    rowCache.clear();
+    eventListeners = new WeakMap();
+    
+    // Daten Arrays leeren
+    tableData = [];
+    
+    console.log('Cleanup abgeschlossen');
 }
 
 // ===================================
@@ -206,7 +319,7 @@ function filterTable() {
     const filters = {
         variableId: document.getElementById('filterVariableId').value.toLowerCase(),
         modbusRegisterID: document.getElementById('filterModbusRegisterID').value.toLowerCase(),
-        menuepunkt: document.getElementById('filterMenuepunkt').value, // NICHT toLowerCase hier!
+        menuepunkt: document.getElementById('filterMenuepunkt').value,
         title: document.getElementById('filterTitle').value.toLowerCase(),
         registerType: document.getElementById('filterRegisterType').value,
         value: document.getElementById('filterValue').value.toLowerCase(),
@@ -229,7 +342,7 @@ function filterTable() {
         const matches = {
             variableId: cells[1].textContent.toLowerCase().includes(filters.variableId),
             modbusRegisterID: cells[2].textContent.toLowerCase().includes(filters.modbusRegisterID),
-            menuepunkt: matchesMenuepunktFilter(menuepunkt, filters.menuepunkt), // NEU!
+            menuepunkt: matchesMenuepunktFilter(menuepunkt, filters.menuepunkt),
             title: cells[4].textContent.toLowerCase().includes(filters.title),
             registerType: !filters.registerType || (point && point.modbusregistertype === filters.registerType),
             value: cells[6].textContent.toLowerCase().includes(filters.value),
@@ -261,29 +374,14 @@ function resetFilters() {
     filterTable();
 }
 
-/**
- * Menüpunkte werden falsch sortiert (1.2.10 vor 1.2.2)
- * Filter findet auch Menüpunkte die NICHT mit "1." beginnen
- */
-
-// ============================================================================
-// Verbesserte Sortier-Funktion für Menüpunkte
-// ============================================================================
-
-/**
- * Vergleicht zwei Menüpunkt-Strings nach Versionsnummer-Logik
- * "1.2.2" kommt VOR "1.2.10" (nicht alphabetisch!)
- */
 function compareMenuepunkt(a, b) {
-    // Leere Werte ans Ende
     if (!a && !b) return 0;
     if (!a) return 1;
     if (!b) return -1;
     
-    // In Teile aufsplitten
     const partsA = a.split('.').map(part => {
         const num = parseInt(part);
-        return isNaN(num) ? part : num; // Zahlen als Zahlen, Rest als String
+        return isNaN(num) ? part : num;
     });
     
     const partsB = b.split('.').map(part => {
@@ -291,30 +389,22 @@ function compareMenuepunkt(a, b) {
         return isNaN(num) ? part : num;
     });
     
-    // Teil für Teil vergleichen
     const maxLength = Math.max(partsA.length, partsB.length);
     
     for (let i = 0; i < maxLength; i++) {
         const partA = partsA[i];
         const partB = partsB[i];
         
-        // Wenn ein Teil fehlt, ist der kürzere kleiner
         if (partA === undefined) return -1;
         if (partB === undefined) return 1;
         
-        // Beide Zahlen: numerisch vergleichen
         if (typeof partA === 'number' && typeof partB === 'number') {
             if (partA !== partB) return partA - partB;
-        }
-        // Unterschiedliche Typen: Zahlen kommen vor Strings
-        else if (typeof partA === 'number') {
+        } else if (typeof partA === 'number') {
             return -1;
-        }
-        else if (typeof partB === 'number') {
+        } else if (typeof partB === 'number') {
             return 1;
-        }
-        // Beide Strings: alphabetisch vergleichen
-        else {
+        } else {
             const cmp = partA.localeCompare(partB);
             if (cmp !== 0) return cmp;
         }
@@ -323,18 +413,6 @@ function compareMenuepunkt(a, b) {
     return 0;
 }
 
-// ============================================================================
-// Verbesserte Filter-Funktion
-// ============================================================================
-
-/**
- * Prüft ob ein Menüpunkt dem Filter entspricht
- * Unterstützt:
- * - "1." = Beginnt mit "1."
- * - "^1." = Beginnt mit "1." (explizit)
- * - "1.2" = Enthält "1.2"
- * - "^1.2$" = Exakt "1.2"
- */
 function matchesMenuepunktFilter(menuepunkt, filterValue) {
     if (!filterValue) return true;
     if (!menuepunkt) return false;
@@ -342,23 +420,19 @@ function matchesMenuepunktFilter(menuepunkt, filterValue) {
     const filter = filterValue.trim().toLowerCase();
     const menu = menuepunkt.toLowerCase();
     
-    // Regex-Pattern erkennen (beginnt mit ^ oder endet mit $)
     if (filter.startsWith('^') || filter.endsWith('$')) {
         try {
             const regex = new RegExp(filter);
             return regex.test(menu);
         } catch (e) {
-            // Ungültiges Regex -> normale Suche
             return menu.includes(filter);
         }
     }
     
-    // Einfacher Filter: Beginnt-mit wenn Filter mit "." endet
     if (filter.endsWith('.')) {
         return menu.startsWith(filter);
     }
     
-    // Standard: Enthält
     return menu.includes(filter);
 }
 
@@ -380,8 +454,6 @@ function updateSelectAllState() {
     selectAll.checked = checkboxes.length > 0 && checkedCount === checkboxes.length;
     selectAll.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
 }
-
-
 
 // ===================================
 // Auto-Update
@@ -443,128 +515,46 @@ async function fetchData() {
     }
 }
 
-/**
- * HINWEIS: Die AJAX-Handler in ajax-handlers.php behandeln automatisch
- * den CRON vs WEB Modus:
- * 
- * - WEB-Modus: 'fetch' macht volle Updates (Master + Log)
- * - CRON-Modus: 'fetch' liefert nur Live-Werte (keine DB-Updates)
- * 
- * Das wird vom Backend gesteuert, JavaScript muss nichts ändern!
- */
-
 function updateTable(newData) {
     tableData = newData;
     const tbody = document.getElementById('tableBody');
-    const oldValues = {};
-    const oldChecked = {};
     
-    tbody.querySelectorAll('tr').forEach(row => {
+    const oldState = new Map();
+    
+    Array.from(tbody.rows).forEach(row => {
         const id = row.dataset.variableid;
-        const cb = row.querySelector('.row-checkbox');
-        if (id && row.cells[6]) oldValues[id] = row.cells[6].textContent.trim();
-        if (id && cb) oldChecked[id] = cb.checked;
+        if (id) {
+            oldState.set(id, {
+                value: row.cells[6] ? row.cells[6].textContent.trim() : '',
+                checked: row.querySelector('.row-checkbox')?.checked || false
+            });
+        }
     });
     
-    tbody.innerHTML = '';
-    
+    const newRowMap = new Map();
     newData.forEach(point => {
-        const row = tbody.insertRow();
-        Object.entries({
-            variableid: point.variableid,
-            variabletype: point.variableType,
-            variablesize: point.variableSize,
-            divisor: point.divisor,
-            decimal: point.decimal,
-            minvalue: point.minValue,
-            maxvalue: point.maxValue,
-            description: point.description || '',
-            menuepunkt: point.menuepunkt || ''
-        }).forEach(([k, v]) => row.dataset[k] = v);
-        
-        row.onmouseenter = e => showTooltip(e, row);
-        row.onmouseleave = hideTooltip;
-        
-        const cbCell = row.insertCell(0);
-        cbCell.className = 'checkbox-cell';
-        const cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.className = 'row-checkbox';
-        cb.checked = oldChecked[point.variableid] || false;
-        cb.onchange = updateSelectAllState;
-        cbCell.appendChild(cb);
-        
-        row.insertCell(1).textContent = point.variableid;
-        row.insertCell(2).textContent = point.modbusregisterid;
-        
-        // Menüpunkt-Zelle
-        const menuepunktCell = row.insertCell(3);
-        menuepunktCell.className = 'menuepunkt-cell';
-        if (USE_DB) { // KORRIGIERT
-            const div = document.createElement('div');
-            div.className = 'menuepunkt-display';
-            const span = document.createElement('span');
-            span.className = 'menuepunkt-value';
-            span.textContent = point.menuepunkt || '-';
-            const btn = document.createElement('button');
-            btn.className = 'btn-menu';
-            btn.textContent = '📝';
-            btn.title = 'Menüpunkt bearbeiten';
-            btn.onclick = () => editMenuepunkt(point.variableid, point.title, point.menuepunkt || '');
-            div.appendChild(span);
-            div.appendChild(btn);
-            menuepunktCell.appendChild(div);
+        newRowMap.set(String(point.variableid), point);
+    });
+    
+    const existingRows = Array.from(tbody.rows);
+    
+    existingRows.forEach(row => {
+        const id = row.dataset.variableid;
+        if (id && newRowMap.has(id)) {
+            const point = newRowMap.get(id);
+            updateRow(row, point, oldState.get(id));
+            newRowMap.delete(id);
         } else {
-            menuepunktCell.textContent = '-';
-        }
-        
-        row.insertCell(4).textContent = point.title;
-        row.insertCell(5).textContent = point.modbusregistertype === 'MODBUS_INPUT_REGISTER' ? 'Input' : (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' ? 'Holding' : point.modbusregistertype);
-        
-        const valueCell = row.insertCell(6);
-        valueCell.className = 'value-cell';
-        
-        if (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' && point.isWritable) {
-            const div = document.createElement('div');
-            div.className = 'editable-value';
-            const span = document.createElement('span');
-            span.className = 'value-display';
-            span.textContent = point.value;
-            const btn = document.createElement('button');
-            btn.className = 'btn-edit';
-            btn.textContent = '✏️';
-            btn.onclick = () => editValue(point.variableid, point.title);
-            div.appendChild(span);
-            div.appendChild(btn);
-            valueCell.appendChild(div);
-            valueCell.dataset.rawvalue = point.rawvalue;
-            valueCell.dataset.divisor = point.divisor;
-            valueCell.dataset.decimal = point.decimal;
-            valueCell.dataset.unit = point.unit;
-        } else {
-            valueCell.textContent = point.value;
-        }
-        
-        if (USE_DB) { // KORRIGIERT
-            const historyCell = row.insertCell();
-            historyCell.style.textAlign = 'center';
-            
-            if (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' && point.isWritable) {
-                const historyBtn = document.createElement('button');
-                historyBtn.className = 'btn-edit';
-                historyBtn.textContent = '📜';
-                historyBtn.onclick = () => showHistory(point.variableid, point.title);
-                historyCell.appendChild(historyBtn);
-            } else {
-                historyCell.textContent = '-';
-            }
-        }
-        
-        if (oldValues[point.variableid] && oldValues[point.variableid] !== point.value) {
-            valueCell.classList.add('value-changed');
-            setTimeout(() => valueCell.classList.remove('value-changed'), 2000);
+            row.remove();
         }
     });
+    
+    newRowMap.forEach((point) => {
+        const row = createRow(point, oldState.get(String(point.variableid)));
+        tbody.appendChild(row);
+    });
+    
+    oldState.clear();
     
     initRegisterTypeFilter();
     filterTable();
@@ -574,6 +564,144 @@ function updateTable(newData) {
     if (currentSortColumn !== null) {
         sortTable(currentSortColumn, true);
     }
+}
+
+function updateRow(row, point, oldState) {
+    row.dataset.variableid = point.variableid;
+    row.dataset.variabletype = point.variableType;
+    row.dataset.variablesize = point.variableSize;
+    row.dataset.divisor = point.divisor;
+    row.dataset.decimal = point.decimal;
+    row.dataset.minvalue = point.minValue;
+    row.dataset.maxvalue = point.maxValue;
+    row.dataset.description = point.description || '';
+    row.dataset.menuepunkt = point.menuepunkt || '';
+    
+    const cb = row.querySelector('.row-checkbox');
+    if (cb && oldState) {
+        cb.checked = oldState.checked;
+    }
+    
+    row.cells[1].textContent = point.variableid;
+    row.cells[2].textContent = point.modbusregisterid;
+    
+    if (USE_DB) {
+        const menuepunktSpan = row.cells[3].querySelector('.menuepunkt-value');
+        if (menuepunktSpan) {
+            menuepunktSpan.textContent = point.menuepunkt || '-';
+        }
+    }
+    
+    row.cells[4].textContent = point.title;
+    row.cells[5].textContent = point.modbusregistertype === 'MODBUS_INPUT_REGISTER' ? 'Input' : 
+                               (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' ? 'Holding' : point.modbusregistertype);
+    
+    const valueCell = row.cells[6];
+    const valueDisplay = valueCell.querySelector('.value-display');
+    
+    if (valueDisplay) {
+        valueDisplay.textContent = point.value;
+        valueCell.dataset.rawvalue = point.rawvalue;
+        valueCell.dataset.divisor = point.divisor;
+        valueCell.dataset.decimal = point.decimal;
+        valueCell.dataset.unit = point.unit;
+    } else {
+        valueCell.textContent = point.value;
+    }
+    
+    if (oldState && oldState.value !== point.value) {
+        valueCell.classList.add('value-changed');
+        setTimeout(() => valueCell.classList.remove('value-changed'), 2000);
+    }
+}
+
+function createRow(point, oldState) {
+    const row = document.createElement('tr');
+    
+    Object.entries({
+        variableid: point.variableid,
+        variabletype: point.variableType,
+        variablesize: point.variableSize,
+        divisor: point.divisor,
+        decimal: point.decimal,
+        minvalue: point.minValue,
+        maxvalue: point.maxValue,
+        description: point.description || '',
+        menuepunkt: point.menuepunkt || ''
+    }).forEach(([k, v]) => row.dataset[k] = v);
+    
+    const cbCell = row.insertCell(0);
+    cbCell.className = 'checkbox-cell';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'row-checkbox';
+    cb.checked = oldState ? oldState.checked : false;
+    cbCell.appendChild(cb);
+    
+    row.insertCell(1).textContent = point.variableid;
+    row.insertCell(2).textContent = point.modbusregisterid;
+    
+    const menuepunktCell = row.insertCell(3);
+    menuepunktCell.className = 'menuepunkt-cell';
+    if (USE_DB) {
+        const div = document.createElement('div');
+        div.className = 'menuepunkt-display';
+        const span = document.createElement('span');
+        span.className = 'menuepunkt-value';
+        span.textContent = point.menuepunkt || '-';
+        const btn = document.createElement('button');
+        btn.className = 'btn-menu';
+        btn.textContent = '📝';
+        btn.title = 'Menüpunkt bearbeiten';
+        div.appendChild(span);
+        div.appendChild(btn);
+        menuepunktCell.appendChild(div);
+    } else {
+        menuepunktCell.textContent = '-';
+    }
+    
+    row.insertCell(4).textContent = point.title;
+    row.insertCell(5).textContent = point.modbusregistertype === 'MODBUS_INPUT_REGISTER' ? 'Input' : 
+                                    (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' ? 'Holding' : point.modbusregistertype);
+    
+    const valueCell = row.insertCell(6);
+    valueCell.className = 'value-cell';
+    
+    if (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' && point.isWritable) {
+        const div = document.createElement('div');
+        div.className = 'editable-value';
+        const span = document.createElement('span');
+        span.className = 'value-display';
+        span.textContent = point.value;
+        const btn = document.createElement('button');
+        btn.className = 'btn-edit';
+        btn.textContent = '✏️';
+        div.appendChild(span);
+        div.appendChild(btn);
+        valueCell.appendChild(div);
+        valueCell.dataset.rawvalue = point.rawvalue;
+        valueCell.dataset.divisor = point.divisor;
+        valueCell.dataset.decimal = point.decimal;
+        valueCell.dataset.unit = point.unit;
+    } else {
+        valueCell.textContent = point.value;
+    }
+    
+    if (USE_DB) {
+        const historyCell = row.insertCell();
+        historyCell.style.textAlign = 'center';
+        
+        if (point.modbusregistertype === 'MODBUS_HOLDING_REGISTER' && point.isWritable) {
+            const historyBtn = document.createElement('button');
+            historyBtn.className = 'btn-edit';
+            historyBtn.textContent = '📜';
+            historyCell.appendChild(historyBtn);
+        } else {
+            historyCell.textContent = '-';
+        }
+    }
+    
+    return row;
 }
 
 function updateCounts() {
@@ -629,14 +757,12 @@ function hideTooltip() {
     document.getElementById('rowTooltip').classList.remove('show');
 }
 
-// Fortsetzung in Teil 2...
-
 // ===================================
 // History Modal
 // ===================================
 
 async function showHistory(variableId, title) {
-    if (!USE_DB) { // KORRIGIERT
+    if (!USE_DB) {
         alert('Datenbank-Funktionen sind deaktiviert');
         return;
     }
@@ -700,6 +826,7 @@ function displayHistoryData(historyData, apiId) {
         const actionCell = row.insertCell(3);
         if (entry.cwna === 'X') {
             const undoBtn = document.createElement('button');
+            undoBtn.className = 'btn
             undoBtn.className = 'btn-undo';
             undoBtn.textContent = '↩️ Wiederherstellen';
             undoBtn.onclick = () => restoreHistoryValue(apiId, entry.wert);
@@ -798,7 +925,7 @@ async function processImport() {
     } catch (error) {
         alert('Fehler beim Import: ' + error.message);
         document.getElementById('btnImportOk').disabled = false;
-        document.getElementById('btnImportOk').textContent = '✔ OK';
+        document.getElementById('btnImportOk').textContent = '✓ OK';
     }
 }
 
@@ -811,7 +938,7 @@ function displayImportResult(result) {
     if (result.success) {
         let html = `
             <div class="import-result success">
-                <h3>✔ Import erfolgreich abgeschlossen</h3>
+                <h3>✓ Import erfolgreich abgeschlossen</h3>
                 <p><strong>Datei enthielt:</strong> ${result.totalRecords} Datensätze</p>
                 <p><strong>Erfolgreich importiert:</strong> ${result.importedRecords} Datensätze</p>
                 <p><strong>Neue Master-Einträge:</strong> ${result.newMasterRecords || 0} Datensätze</p>
@@ -958,7 +1085,7 @@ function closeEditDialog() {
 // ===================================
 
 function editMenuepunkt(variableId, title, currentMenuepunkt) {
-    if (!USE_DB) { // KORRIGIERT
+    if (!USE_DB) {
         alert('Datenbank-Funktionen sind deaktiviert');
         return;
     }
@@ -1017,3 +1144,4 @@ function closeMenuepunktDialog() {
     document.getElementById('menuepunktModal').classList.remove('show');
     currentMenuepunktVariableId = null;
 }
+
