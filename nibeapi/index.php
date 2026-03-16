@@ -20,7 +20,7 @@ require_once 'ajax-handlers.php';
 $error = null;
 $data = [];
 $dbSaveResult = null;
-$version = '3.4.20';
+$version = '3.4.22';
 $devices = [];
 $selectedDeviceId = 0; // Default-Wert
 
@@ -413,7 +413,13 @@ try {
         
         <div id="errorContainer"></div>
         
-        <div class="filter-section">
+        <div class="filter-section" id="filterSection">
+            <button type="button" class="filter-collapse-btn" id="filterCollapseBtn" onclick="toggleFilterSection()" title="Filter ein-/ausklappen">
+                <span class="filter-collapse-icon">▲</span>
+                <span class="filter-collapse-label">Filter</span>
+                <span class="filter-active-badge" id="filterActiveBadge" style="display:none">●</span>
+            </button>
+            <div class="filter-body" id="filterBody">
             <div class="filter-toggles">
                 <div class="toggle-option">
                     <input type="checkbox" id="filterSelectedOnly">
@@ -482,6 +488,7 @@ try {
                     <?php endif; ?>
                 </div>
             </div>
+            </div><!-- /.filter-body -->
         </div>
         
         <div class="info-bar">
@@ -761,6 +768,39 @@ try {
             
             initializeApp(initialData, config);
         });
+        // Filter-Bereich ein-/ausklappen
+        function toggleFilterSection() {
+            const section = document.getElementById('filterSection');
+            const icon   = document.querySelector('.filter-collapse-icon');
+            const collapsed = section.classList.toggle('filter-collapsed');
+            if (icon) icon.textContent = collapsed ? '▼' : '▲';
+            localStorage.setItem('filterCollapsed', collapsed ? '1' : '0');
+        }
+
+        // Aktiven-Filter-Badge aktualisieren
+        function updateFilterBadge() {
+            const ids = ['filterVariableId','filterModbusRegisterID','filterMenuepunkt','filterTitle','filterValue'];
+            const sel = document.getElementById('filterRegisterType');
+            const hasText = ids.some(id => (document.getElementById(id)?.value || '').trim() !== '');
+            const hasSel = sel && sel.value !== '';
+            document.getElementById('filterActiveBadge').style.display = (hasText || hasSel) ? 'inline' : 'none';
+        }
+
+        // Badge bei jeder Eingabe aktualisieren
+        document.addEventListener('DOMContentLoaded', () => {
+            ['filterVariableId','filterModbusRegisterID','filterMenuepunkt','filterTitle','filterValue'].forEach(id => {
+                document.getElementById(id)?.addEventListener('input', updateFilterBadge);
+            });
+            document.getElementById('filterRegisterType')?.addEventListener('change', updateFilterBadge);
+
+            // Gespeicherten Zustand wiederherstellen
+            if (localStorage.getItem('filterCollapsed') === '1') {
+                document.getElementById('filterSection').classList.add('filter-collapsed');
+                const icon = document.querySelector('.filter-collapse-icon');
+                if (icon) icon.textContent = '▼';
+            }
+        });
+
         function checkCronjobStatus() {
             alert('Cronjob-Status prüfen:\n\n' +
                   '1. SSH zum Server verbinden\n' +
