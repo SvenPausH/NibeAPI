@@ -1,7 +1,7 @@
 <?php
 /**
  * Historie-Seite für nibe_datenpunkte_log
- * history.php - Version 3.3.00
+ * history.php - 
  */
 
 // UTF-8 Encoding sicherstellen
@@ -18,7 +18,7 @@ if (!USE_DB) {
     die('Datenbank-Funktionen sind deaktiviert. Bitte aktivieren Sie USE_DB in der config.php');
 }
 
-$version = '3.4.10';
+$version = '3.4.22';
 
 // Pagination Parameter
 $page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
@@ -262,7 +262,20 @@ $totalPages = max(1, $totalPages);
             <div class="error"><strong>Fehler:</strong> <?php echo htmlspecialchars($error); ?></div>
         <?php endif; ?>
         
-        <div class="filter-section">
+        <?php
+        $hasActiveFilter = !empty($filterApiId) || !empty($filterModbusId) || !empty($filterTitle) || !empty($filterWert) || !empty($filterZeitVon) || !empty($filterZeitBis);
+        ?>
+        <div class="filter-section" id="filterSection">
+            <button type="button" class="filter-collapse-btn" id="filterCollapseBtn" onclick="toggleFilterSection()" title="Filter ein-/ausklappen">
+                <span class="filter-collapse-icon">▲</span>
+                <span class="filter-collapse-label">Filter</span>
+                <?php if ($hasActiveFilter): ?>
+                    <span class="filter-active-badge">●</span>
+                <?php else: ?>
+                    <span class="filter-active-badge" style="display:none">●</span>
+                <?php endif; ?>
+            </button>
+            <div class="filter-body" id="filterBody">
             <div class="filter-row" style="margin-bottom: 15px;">
                 <div class="filter-group">
                     <label for="filterApiId">API ID</label>
@@ -317,6 +330,7 @@ $totalPages = max(1, $totalPages);
             <div class="button-group">
                 <button type="button" class="btn-reset" onclick="resetFilters()">Zurücksetzen</button>
             </div>
+            </div><!-- /.filter-body -->
         </div>
         
         <div class="info-bar">
@@ -414,6 +428,25 @@ $totalPages = max(1, $totalPages);
     </div>
     
     <script>
+        // Filter-Bereich ein-/ausklappen
+        function toggleFilterSection() {
+            const section = document.getElementById('filterSection');
+            const icon    = document.querySelector('.filter-collapse-icon');
+            const collapsed = section.classList.toggle('filter-collapsed');
+            if (icon) icon.textContent = collapsed ? '▼' : '▲';
+            localStorage.setItem('historyFilterCollapsed', collapsed ? '1' : '0');
+        }
+
+        // Gespeicherten Zustand beim Laden wiederherstellen
+        (function() {
+            if (localStorage.getItem('historyFilterCollapsed') === '1') {
+                const section = document.getElementById('filterSection');
+                const icon    = document.querySelector('.filter-collapse-icon');
+                if (section) section.classList.add('filter-collapsed');
+                if (icon)    icon.textContent = '▼';
+            }
+        })();
+
         // Live-Filter Funktionalität
         let filterTimeout;
         
