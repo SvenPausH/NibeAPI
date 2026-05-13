@@ -20,7 +20,7 @@ require_once 'ajax-handlers.php';
 $error = null;
 $data = [];
 $dbSaveResult = null;
-$version = '3.4.22';
+$version = '3.4.24';
 $devices = [];
 $selectedDeviceId = 0; // Default-Wert
 
