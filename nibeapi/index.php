@@ -279,6 +279,26 @@ try {
         .btn-notifications:hover {
             background: #F57C00;
         }
+        /* ── NEU: Export & Vergleich ── */
+        .btn-export {
+            background: #4CAF50;
+            color: white;
+        }
+        .btn-export:hover {
+            background: #388E3C;
+        }
+        .btn-export:disabled {
+            background: #A5D6A7;
+            cursor: not-allowed;
+        }
+        .btn-compare {
+            background: #9C27B0;
+            color: white;
+        }
+        .btn-compare:hover {
+            background: #7B1FA2;
+        }
+        /* ─────────────────────────── */
         .device-info {
             font-size: 13px;
             color: #666;
@@ -296,32 +316,26 @@ try {
             align-items: center;
             gap: 15px;
         }
-        
         .update-warning-icon {
             font-size: 32px;
             flex-shrink: 0;
         }
-        
         .update-warning-content {
             flex: 1;
         }
-        
         .update-warning-title {
             font-weight: 600;
             color: #f57c00;
             margin-bottom: 5px;
         }
-        
         .update-warning-details {
             color: #666;
             font-size: 14px;
             margin-top: 5px;
         }
-        
         .update-warning-actions {
             margin-top: 10px;
         }
-        
         .btn-warning {
             background: #ff9800;
             color: white;
@@ -333,17 +347,15 @@ try {
             text-decoration: none;
             display: inline-block;
         }
-        
         .btn-warning:hover {
             background: #f57c00;
         }
-	.filter-help {
-	     cursor: help;
-	     color: #2196F3;
-	     font-size: 14px;
-	     margin-left: 5px;
+        .filter-help {
+            cursor: help;
+            color: #2196F3;
+            font-size: 14px;
+            margin-left: 5px;
         }
-
     </style>
 </head>
 <body>
@@ -485,6 +497,8 @@ try {
                         <button class="btn-import" onclick="showImportDialog()">📥 Import Nibe logs</button>
                         <button class="btn-history" onclick="window.location.href='history.php'">📊 Historie</button>
                         <button class="btn-notifications" onclick="window.location.href='notifications.php'">🔔 Notifications</button>
+                        <button class="btn-export" onclick="exportDatapoints()">📤 Datenexport</button>
+                        <button class="btn-compare" onclick="window.location.href='compare.php?deviceId=<?php echo $selectedDeviceId; ?>'">🔀 Vergleich</button>
                     <?php endif; ?>
                 </div>
             </div>
@@ -596,7 +610,6 @@ try {
         </div>
     </div>
     
-    <!-- Alle Modals bleiben gleich -->
     <!-- History Modal -->
     <div class="history-modal" id="historyModal">
         <div class="history-content">
@@ -719,7 +732,7 @@ try {
     <script src="assets/script.js"></script>
     <script>
         // Globale Device ID für AJAX-Requests
-         currentDeviceId = <?php echo $selectedDeviceId ?? 0; ?>;
+        currentDeviceId = <?php echo $selectedDeviceId ?? 0; ?>;
         
         // Device wechseln
         function changeDevice(deviceId) {
@@ -754,6 +767,32 @@ try {
                 alert('❌ Verbindungsfehler: ' + error.message);
             }
         }
+
+        // ── NEU: Datenpunkte als JSON exportieren ────────────────────────
+        function exportDatapoints() {
+            const btn = document.querySelector('.btn-export');
+            const origText = btn ? btn.textContent : '';
+            if (btn) {
+                btn.textContent = '⏳ Export...';
+                btn.disabled = true;
+            }
+
+            // Download auslösen – Dateiname kommt vom Server via Content-Disposition
+            const a = document.createElement('a');
+            a.href = 'export.php?deviceId=' + currentDeviceId;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // Button nach 3 Sekunden wieder aktivieren
+            if (btn) {
+                setTimeout(() => {
+                    btn.textContent = origText;
+                    btn.disabled = false;
+                }, 3000);
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────
         
         // App initialisieren mit Server-Daten
         window.addEventListener('DOMContentLoaded', () => {
@@ -768,6 +807,7 @@ try {
             
             initializeApp(initialData, config);
         });
+
         // Filter-Bereich ein-/ausklappen
         function toggleFilterSection() {
             const section = document.getElementById('filterSection');
