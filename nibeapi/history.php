@@ -31,6 +31,7 @@ $filterApiId = $_GET['filterApiId'] ?? '';
 $filterModbusId = $_GET['filterModbusId'] ?? '';
 $filterTitle = $_GET['filterTitle'] ?? '';
 $filterWert = $_GET['filterWert'] ?? '';
+$filterArt = $_GET['filterArt'] ?? '';   // '', 'auto', 'X' (manuell), 'I' (import)
 $filterZeitVon = $_GET['filterZeitVon'] ?? '';
 $filterZeitBis = $_GET['filterZeitBis'] ?? '';
 
@@ -74,6 +75,14 @@ try {
     if (!empty($filterWert)) {
         $whereClauses[] = "log.wert LIKE ?";
         $params[] = "%$filterWert%";
+    }
+    
+    if ($filterArt === 'X' || $filterArt === 'I') {
+        $whereClauses[] = "log.cwna = ?";
+        $params[] = $filterArt;
+    } elseif ($filterArt === 'auto') {
+        // Alles, was weder MANUELL (X) noch IMPORT (I) ist
+        $whereClauses[] = "(log.cwna IS NULL OR log.cwna NOT IN ('X', 'I'))";
     }
     
     if (!empty($filterZeitVonFull)) {
@@ -263,7 +272,7 @@ $totalPages = max(1, $totalPages);
         <?php endif; ?>
         
         <?php
-        $hasActiveFilter = !empty($filterApiId) || !empty($filterModbusId) || !empty($filterTitle) || !empty($filterWert) || !empty($filterZeitVon) || !empty($filterZeitBis);
+        $hasActiveFilter = !empty($filterApiId) || !empty($filterModbusId) || !empty($filterTitle) || !empty($filterWert) || !empty($filterArt) || !empty($filterZeitVon) || !empty($filterZeitBis);
         ?>
         <div class="filter-section" id="filterSection">
             <button type="button" class="filter-collapse-btn" id="filterCollapseBtn" onclick="toggleFilterSection()" title="Filter ein-/ausklappen">
@@ -292,6 +301,15 @@ $totalPages = max(1, $totalPages);
                 <div class="filter-group">
                     <label for="filterWert">Wert</label>
                     <input type="text" id="filterWert" name="filterWert" value="<?php echo htmlspecialchars($filterWert); ?>" placeholder="Filter nach Wert...">
+                </div>
+                <div class="filter-group">
+                    <label for="filterArt">Art</label>
+                    <select id="filterArt" name="filterArt">
+                        <option value="" <?php echo $filterArt === '' ? 'selected' : ''; ?>>Alle</option>
+                        <option value="auto" <?php echo $filterArt === 'auto' ? 'selected' : ''; ?>>Auto</option>
+                        <option value="X" <?php echo $filterArt === 'X' ? 'selected' : ''; ?>>Manuell</option>
+                        <option value="I" <?php echo $filterArt === 'I' ? 'selected' : ''; ?>>Import</option>
+                    </select>
                 </div>
             </div>
             
@@ -458,6 +476,7 @@ $totalPages = max(1, $totalPages);
                 url.searchParams.set('filterModbusId', document.getElementById('filterModbusId').value);
                 url.searchParams.set('filterTitle', document.getElementById('filterTitle').value);
                 url.searchParams.set('filterWert', document.getElementById('filterWert').value);
+                url.searchParams.set('filterArt', document.getElementById('filterArt').value);
                 url.searchParams.set('filterZeitVon', document.getElementById('filterZeitVon').value);
                 url.searchParams.set('filterZeitBis', document.getElementById('filterZeitBis').value);
                 url.searchParams.set('sortBy', document.getElementById('sortBy').value);
@@ -485,6 +504,9 @@ $totalPages = max(1, $totalPages);
             document.getElementById('filterModbusId').addEventListener('input', applyFilters);
             document.getElementById('filterTitle').addEventListener('input', applyFilters);
             document.getElementById('filterWert').addEventListener('input', applyFilters);
+            
+            // Art-Filter
+            document.getElementById('filterArt').addEventListener('change', applyFilters);
             
             // Datums-Filter (type="date" - nur Datum, Uhrzeit wird automatisch im Backend gesetzt)
             document.getElementById('filterZeitVon').addEventListener('change', applyFilters);
