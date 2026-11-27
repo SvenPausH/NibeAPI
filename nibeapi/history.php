@@ -77,12 +77,12 @@ try {
         $params[] = "%$filterWert%";
     }
     
-    if ($filterArt === 'X' || $filterArt === 'I') {
+    if ($filterArt === 'X' || $filterArt === 'I' || $filterArt === 'R') {
         $whereClauses[] = "log.cwna = ?";
         $params[] = $filterArt;
     } elseif ($filterArt === 'auto') {
-        // Alles, was weder MANUELL (X) noch IMPORT (I) ist
-        $whereClauses[] = "(log.cwna IS NULL OR log.cwna NOT IN ('X', 'I'))";
+        // Alles, was weder MANUELL (X), IMPORT (I) noch REGEL (R) ist
+        $whereClauses[] = "(log.cwna IS NULL OR log.cwna NOT IN ('X', 'I', 'R'))";
     }
     
     if (!empty($filterZeitVonFull)) {
@@ -239,6 +239,10 @@ $totalPages = max(1, $totalPages);
         .cwna-badge-history.import {
             background: #2196F3;
         }
+
+        .cwna-badge-history.rule {
+            background: #607D8B;
+        }
         
         input[type="date"] {
             padding: 10px;
@@ -309,6 +313,7 @@ $totalPages = max(1, $totalPages);
                         <option value="auto" <?php echo $filterArt === 'auto' ? 'selected' : ''; ?>>Auto</option>
                         <option value="X" <?php echo $filterArt === 'X' ? 'selected' : ''; ?>>Manuell</option>
                         <option value="I" <?php echo $filterArt === 'I' ? 'selected' : ''; ?>>Import</option>
+                        <option value="R" <?php echo $filterArt === 'R' ? 'selected' : ''; ?>>Regel (Steuerung)</option>
                     </select>
                 </div>
             </div>
@@ -433,6 +438,8 @@ $totalPages = max(1, $totalPages);
                                         <span class="cwna-badge-history">MANUELL</span>
                                     <?php elseif ($row['cwna'] === 'I'): ?>
                                         <span class="cwna-badge-history import">IMPORT</span>
+                                    <?php elseif ($row['cwna'] === 'R'): ?>
+                                        <span class="cwna-badge-history rule">REGEL</span>
                                     <?php else: ?>
                                         Auto
                                     <?php endif; ?>

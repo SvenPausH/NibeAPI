@@ -34,7 +34,7 @@ define('NOTIFICATIONS_CHECK_INTERVAL', 300); // Alle 5 Minuten
 // NOTIFICATION MONITOR KONFIGURATION
 // ============================================================================
 
-/ E-Mail Benachrichtigungen
+// E-Mail Benachrichtigungen
 define('NOTIFY_EMAIL_ENABLED', true);
 define('NOTIFY_EMAIL_METHOD', 'smtp'); // 'smtp' oder 'mail' (PHP mail())
 
@@ -46,6 +46,7 @@ define('NOTIFY_SMTP_AUTH', true); // true wenn Authentifizierung erforderlich
 define('NOTIFY_SMTP_USERNAME', 'your-email@example.com');
 define('NOTIFY_SMTP_PASSWORD', 'your-password');
 
+// E-Mail Absender/Empfänger
 define('NOTIFY_EMAIL_FROM', 'nibe@example.com');
 define('NOTIFY_EMAIL_FROM_NAME', 'Nibe Notification Monitor');
 define('NOTIFY_EMAIL_TO', 'admin@example.com'); // Mehrere: 'mail1@ex.com,mail2@ex.com'
@@ -63,6 +64,21 @@ define('NOTIFY_COOLDOWN_MINUTES', 5); // Gleiche Notification nicht öfter als a
 // Notifications Update-Intervall (in Sekunden, 0 = deaktiviert)
 define('NOTIFICATIONS_CHECK_INTERVAL', 300); // Alle 5 Minuten
 define('NOTIFICATIONS_CHECK_BY', 'CRON'); // 'CRON' oder 'WEB'
+
+// ============================================================================
+// STEUERUNG (steuerung.php / control-cron.php)
+// ============================================================================
+
+// Steuerung aktivieren/deaktivieren (false = der Cronjob sendet nichts mehr)
+define('CONTROL_ENABLED', true);
+
+// Wenn die Steuerung einen Wert gesendet hat, der Wert aber nicht übernommen wurde
+// (oder die Anlage ihn sofort zurücksetzt), wird derselbe Wert frühestens nach
+// X Minuten erneut gesendet. 0 = immer sofort erneut versuchen.
+define('CONTROL_RESEND_MINUTES', 10);
+
+// Protokoll der Steuerung (nibe_regel_log) nach X Tagen löschen. 0 = nie löschen.
+define('CONTROL_LOG_RETENTION_DAYS', 90);
 
 // ============================================================================
 // AUTHENTIFIZIERUNG

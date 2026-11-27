@@ -11,6 +11,9 @@ ob_start();
 error_reporting(0);
 ini_set('display_errors', 0);
 
+// Version 3.5.0: gespeicherte Auswahlen + Steuerung (beendet die Ausführung bei passender Aktion)
+require_once __DIR__ . '/ajax-handlers-extra.php';
+
 // ============================================================================
 // AJAX-Request für einzelne Notification zurücksetzen
 // ============================================================================

@@ -371,7 +371,19 @@ function resetFilters() {
     document.getElementById('filterValue').value = '';
     document.getElementById('filterSelectedOnly').checked = false;
     document.getElementById('hideValuesActive').checked = true;
+    clearRowSelection();
     filterTable();
+    if (typeof resetSelectionBar === 'function') resetSelectionBar();
+}
+
+// Alle Auswahl-Häkchen der Tabelle entfernen
+function clearRowSelection() {
+    document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = false; });
+    const selectAll = document.getElementById('selectAll');
+    if (selectAll) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+    }
 }
 
 function compareMenuepunkt(a, b) {
@@ -819,6 +831,8 @@ function displayHistoryData(historyData, apiId) {
             manualCell.innerHTML = '<span class="cwna-badge">MANUELL</span>';
         } else if (entry.cwna === 'I') {
             manualCell.innerHTML = '<span class="cwna-badge import">IMPORT</span>';
+        } else if (entry.cwna === 'R') {
+            manualCell.innerHTML = '<span class="cwna-badge rule">REGEL</span>';
         } else {
             manualCell.textContent = '-';
         }
@@ -826,7 +840,6 @@ function displayHistoryData(historyData, apiId) {
         const actionCell = row.insertCell(3);
         if (entry.cwna === 'X') {
             const undoBtn = document.createElement('button');
-            undoBtn.className = 'btn
             undoBtn.className = 'btn-undo';
             undoBtn.textContent = '↩️ Wiederherstellen';
             undoBtn.onclick = () => restoreHistoryValue(apiId, entry.wert);
@@ -1145,3 +1158,230 @@ function closeMenuepunktDialog() {
     currentMenuepunktVariableId = null;
 }
 
+
+// ===================================
+// Gespeicherte Auswahlen (v3.5.0)
+// ===================================
+// Eine Auswahl ist eine benannte Liste von API-IDs (die Häkchen in der Tabelle).
+// Sie gehört zu einem Device und wird in der Datenbank gespeichert.
+
+let selectionList = [];
+let loadedSelection = null; // { id, name, apiIds: Set<number> }
+
+function selectionStorageKey() {
+    return 'nibeSelection_' + currentDeviceId;
+}
+
+async function selectionRequest(action, body) {
+    const options = body ? {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body)
+    } : {};
+    const response = await fetch('?ajax=' + action, options);
+    const result = await response.json();
+    if (!result.success) {
+        throw new Error(result.error || 'Unbekannter Fehler');
+    }
+    return result;
+}
+
+function getCheckedApiIds() {
+    return Array.from(document.querySelectorAll('#tableBody tr[data-variableid]'))
+        .filter(tr => tr.querySelector('.row-checkbox')?.checked)
+        .map(tr => parseInt(tr.dataset.variableid, 10));
+}
+
+function getTableApiIds() {
+    return new Set(Array.from(document.querySelectorAll('#tableBody tr[data-variableid]'))
+        .map(tr => parseInt(tr.dataset.variableid, 10)));
+}
+
+async function initSelections() {
+    if (!USE_DB || !document.getElementById('selectionSelect')) return;
+
+    document.getElementById('tableBody').addEventListener('change', updateSelectionState);
+    document.getElementById('selectAll').addEventListener('change', updateSelectionState);
+
+    try {
+        await reloadSelections();
+    } catch (e) {
+        document.getElementById('selectionInfo').textContent = 'Auswahlen nicht verfügbar: ' + e.message;
+        return;
+    }
+
+    // Es wird bewusst keine Auswahl automatisch geladen: die Seite startet immer ohne Auswahl.
+    // Ein früher gemerkter Eintrag aus Version 3.5.0 wird entfernt.
+    localStorage.removeItem(selectionStorageKey());
+    updateSelectionState();
+}
+
+async function reloadSelections(selectId) {
+    const result = await selectionRequest('getSelections&deviceId=' + currentDeviceId);
+    selectionList = result.selections;
+
+    const select = document.getElementById('selectionSelect');
+    select.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = 'ohne Auswahl';
+    select.appendChild(none);
+    selectionList.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name + ' (' + s.anzahl + ')';
+        select.appendChild(opt);
+    });
+    if (selectId) select.value = String(selectId);
+}
+
+async function onSelectionChange() {
+    const id = document.getElementById('selectionSelect').value;
+
+    if (!id) {
+        // "ohne Auswahl": keine Auswahl geladen, Häkchen und "Nur ausgewählte" zurücksetzen
+        loadedSelection = null;
+        localStorage.removeItem(selectionStorageKey());
+        clearRowSelection();
+        document.getElementById('filterSelectedOnly').checked = false;
+        filterTable();
+        updateSelectionState();
+        return;
+    }
+
+    try {
+        const result = await selectionRequest('getSelection&id=' + id);
+        const sel = result.selection;
+        loadedSelection = { id: sel.id, name: sel.name, apiIds: new Set(sel.apiIds.map(Number)) };
+
+        document.querySelectorAll('#tableBody tr[data-variableid]').forEach(tr => {
+            const cb = tr.querySelector('.row-checkbox');
+            if (cb) cb.checked = loadedSelection.apiIds.has(parseInt(tr.dataset.variableid, 10));
+        });
+        document.getElementById('filterSelectedOnly').checked = true;
+        filterTable();
+        updateSelectionState();
+    } catch (e) {
+        alert('Auswahl konnte nicht geladen werden: ' + e.message);
+    }
+}
+
+// Aufgerufen von "Zurücksetzen": Dropdown auf "ohne Auswahl", gemerkte Auswahl verwerfen
+function resetSelectionBar() {
+    const select = document.getElementById('selectionSelect');
+    if (!select) return;
+    loadedSelection = null;
+    select.value = '';
+    updateSelectionState();
+}
+
+function selectionIsDirty() {
+    if (!loadedSelection) return false;
+    const tableIds = getTableApiIds();
+    // Punkte, die es auf diesem Gerät nicht gibt, zählen nicht als Änderung
+    const saved = new Set([...loadedSelection.apiIds].filter(id => tableIds.has(id)));
+    const current = new Set(getCheckedApiIds());
+    if (saved.size !== current.size) return true;
+    for (const id of current) if (!saved.has(id)) return true;
+    return false;
+}
+
+function updateSelectionState() {
+    const info = document.getElementById('selectionInfo');
+    if (!info) return;
+
+    const checked = getCheckedApiIds().length;
+    const dirty = selectionIsDirty();
+
+    document.getElementById('btnSelSave').disabled = !(loadedSelection && dirty);
+    document.getElementById('btnSelSaveAs').disabled = checked === 0;
+    document.getElementById('btnSelRename').disabled = !loadedSelection;
+    document.getElementById('btnSelDelete').disabled = !loadedSelection;
+
+    info.classList.toggle('dirty', dirty);
+    if (loadedSelection) {
+        const missing = [...loadedSelection.apiIds].filter(id => !getTableApiIds().has(id)).length;
+        info.textContent = dirty
+            ? '● Ungespeicherte Änderungen (' + checked + ' ausgewählt)'
+            : '✓ ' + checked + ' Datenpunkte' + (missing ? ' (' + missing + ' nicht auf diesem Gerät)' : '');
+    } else {
+        info.textContent = checked + ' ausgewählt';
+    }
+}
+
+// Auswahl überschreiben (Änderungen an einer geladenen Auswahl speichern)
+async function saveCurrentSelection() {
+    if (!loadedSelection) return;
+
+    // Punkte, die es auf diesem Gerät nicht gibt, bleiben erhalten
+    const tableIds = getTableApiIds();
+    const keep = [...loadedSelection.apiIds].filter(id => !tableIds.has(id));
+    const apiIds = [...new Set([...getCheckedApiIds(), ...keep])];
+
+    try {
+        await selectionRequest('saveSelection', {
+            id: loadedSelection.id, name: loadedSelection.name, deviceId: currentDeviceId, apiIds: apiIds
+        });
+        await reloadSelections(loadedSelection.id);
+        await onSelectionChange();
+    } catch (e) {
+        alert('Fehler beim Speichern: ' + e.message);
+    }
+}
+
+// Aktuelle Häkchen unter neuem Namen speichern
+async function saveSelectionAs() {
+    const apiIds = getCheckedApiIds();
+    if (apiIds.length === 0) {
+        alert('Bitte zuerst Datenpunkte mit den Häkchen auswählen.');
+        return;
+    }
+
+    const name = prompt('Name der Auswahl (' + apiIds.length + ' Datenpunkte):', '');
+    if (name === null) return;
+    if (name.trim() === '') {
+        alert('Bitte einen Namen eingeben.');
+        return;
+    }
+
+    try {
+        const result = await selectionRequest('saveSelection', {
+            id: null, name: name.trim(), deviceId: currentDeviceId, apiIds: apiIds
+        });
+        await reloadSelections(result.id);
+        await onSelectionChange();
+    } catch (e) {
+        alert('Fehler beim Speichern: ' + e.message);
+    }
+}
+
+async function renameSelection() {
+    if (!loadedSelection) return;
+    const name = prompt('Neuer Name der Auswahl:', loadedSelection.name);
+    if (name === null || name.trim() === '' || name.trim() === loadedSelection.name) return;
+
+    try {
+        // ohne apiIds: nur umbenennen, die Datenpunkte bleiben unverändert
+        await selectionRequest('saveSelection', { id: loadedSelection.id, name: name.trim(), deviceId: currentDeviceId });
+        loadedSelection.name = name.trim();
+        await reloadSelections(loadedSelection.id);
+        updateSelectionState();
+    } catch (e) {
+        alert('Fehler beim Umbenennen: ' + e.message);
+    }
+}
+
+async function deleteCurrentSelection() {
+    if (!loadedSelection) return;
+    if (!confirm('Auswahl "' + loadedSelection.name + '" wirklich löschen?\n\n(Die Häkchen in der Tabelle bleiben bestehen.)')) return;
+
+    try {
+        await selectionRequest('deleteSelection', { id: loadedSelection.id });
+        loadedSelection = null;
+        localStorage.removeItem(selectionStorageKey());
+        await reloadSelections();
+        updateSelectionState();
+    } catch (e) {
+        alert('Fehler beim Löschen: ' + e.message);
+    }
+}

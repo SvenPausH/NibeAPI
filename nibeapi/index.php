@@ -20,7 +20,7 @@ require_once 'ajax-handlers.php';
 $error = null;
 $data = [];
 $dbSaveResult = null;
-$version = '3.4.24';
+$version = '3.5.0';
 $devices = [];
 $selectedDeviceId = 0; // Default-Wert
 
@@ -233,7 +233,7 @@ try {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nibe API Datenpunkte - Live <?php echo $version?></title>
-    <link rel="stylesheet" href="assets/styles.css">
+    <link rel="stylesheet" href="assets/styles.css?v=<?php echo @filemtime(__DIR__ . '/assets/styles.css'); ?>">
     <style>
         .device-selector {
             background: #e3f2fd;
@@ -446,6 +446,37 @@ try {
                     <label for="hideValuesActive">Hide Values aktiv</label>
                 </div>
             </div>
+
+            <?php if (USE_DB): ?>
+            <?php
+            // Fehlende Tabellen (v3.5.0) anlegen; bei Fehlschlag die Ursache sichtbar machen
+            $installError = null;
+            try {
+                require_once __DIR__ . '/selections.php';
+                ensureExtensionTables();
+            } catch (Exception $e) {
+                $installError = $e->getMessage();
+            }
+            ?>
+            <?php if ($installError): ?>
+            <div class="error">⚠ Datenbank-Update 3.5.0 nicht möglich: <?php echo htmlspecialchars($installError); ?></div>
+            <?php else: ?>
+            <!-- Gespeicherte Auswahlen (v3.5.0) -->
+            <div class="selection-bar" id="selectionBar">
+                <label for="selectionSelect">⭐ Auswahl:</label>
+                <select id="selectionSelect" onchange="onSelectionChange()">
+                    <option value="">Lade…</option>
+                </select>
+                <button type="button" class="btn-sel btn-sel-save" id="btnSelSave" onclick="saveCurrentSelection()" disabled
+                        title="Änderungen an der geladenen Auswahl speichern">💾 Speichern</button>
+                <button type="button" class="btn-sel" id="btnSelSaveAs" onclick="saveSelectionAs()" disabled
+                        title="Aktuelle Häkchen unter einem neuen Namen speichern">➕ Speichern unter…</button>
+                <button type="button" class="btn-sel" id="btnSelRename" onclick="renameSelection()" disabled>✏️ Umbenennen</button>
+                <button type="button" class="btn-sel btn-sel-del" id="btnSelDelete" onclick="deleteCurrentSelection()" disabled>🗑️ Löschen</button>
+                <span class="selection-info" id="selectionInfo"></span>
+            </div>
+            <?php endif; ?>
+            <?php endif; ?>
             
             <div class="filter-row">
                 <div class="filter-group">
@@ -496,6 +527,7 @@ try {
                     <?php if (USE_DB): ?>
                         <button class="btn-import" onclick="showImportDialog()">📥 Import Nibe logs</button>
                         <button class="btn-history" onclick="window.location.href='history.php'">📊 Historie</button>
+                        <button class="btn-control" onclick="window.location.href='steuerung.php?deviceId=<?php echo $selectedDeviceId; ?>'">⚙️ Steuerung</button>
                         <button class="btn-notifications" onclick="window.location.href='notifications.php'">🔔 Notifications</button>
                         <button class="btn-export" onclick="exportDatapoints()">📤 Datenexport</button>
                         <button class="btn-compare" onclick="window.location.href='compare.php?deviceId=<?php echo $selectedDeviceId; ?>'">🔀 Vergleich</button>
@@ -729,7 +761,7 @@ try {
         </div>
     </div>
     
-    <script src="assets/script.js"></script>
+    <script src="assets/script.js?v=<?php echo @filemtime(__DIR__ . '/assets/script.js'); ?>"></script>
     <script>
         // Globale Device ID für AJAX-Requests
         currentDeviceId = <?php echo $selectedDeviceId ?? 0; ?>;
@@ -806,6 +838,15 @@ try {
             };
             
             initializeApp(initialData, config);
+            if (config.useDb && document.getElementById('selectionBar')) {
+                if (typeof initSelections === 'function') {
+                    initSelections();
+                } else {
+                    document.getElementById('selectionInfo').textContent =
+                        '⚠ assets/script.js ist nicht aktuell (Funktion initSelections fehlt). Bitte die Datei aus Version 3.5.0 hochladen und Strg+F5 drücken.';
+                    document.getElementById('selectionSelect').innerHTML = '<option value="">nicht verfügbar</option>';
+                }
+            }
         });
 
         // Filter-Bereich ein-/ausklappen
