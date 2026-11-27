@@ -74,7 +74,7 @@ Die API wird alle 10 Sekunden gelesen. Das Update Intervall ist in der config.ph
 ### Alarme
 <img width="1427" height="779" alt="APIAlarme" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeApiAlarme.png" />
 
-### Alarme
+### Steuerung
 <img width="1427" height="779" alt="APIAlarme" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeSteuerung.png" />
 
 
