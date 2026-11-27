@@ -58,6 +58,10 @@ Die API wird alle 10 Sekunden gelesen. Das Update Intervall ist in der config.ph
 - 🐛 Diverse Bugfixes
 - ! Da es eine Änderung der Datenbankstruktur gegeben hat, müssen hier diverse Tabellen und Spalten eingerichtet werden. Schaut einmal in den UpgradeGiude3.4.txt
   
+### Version 3.5.00
+- ✨ Datenpunkt Auswahl kann gespeichert werden.
+- ✨ Steuerung Erstellung von komplexen Regeln um die Anlage zu steuern.
+  
 ### Übersicht Seite
 <img width="1427" height="779" alt="API Datenpunkte Uebersicht" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeApiUebersicht.png" />
 
@@ -69,6 +73,9 @@ Die API wird alle 10 Sekunden gelesen. Das Update Intervall ist in der config.ph
 
 ### Alarme
 <img width="1427" height="779" alt="APIAlarme" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeApiAlarme.png" />
+
+### Alarme
+<img width="1427" height="779" alt="APIAlarme" src="https://github.com/SvenPausH/NibeAPI/blob/main/NibeSteuerung.png" />
 
 
 
